@@ -1035,9 +1035,7 @@ function UserPortal({ user, onLogout }) {
                           )}
                         </div>
                       )}
-                      <div style={{ fontSize: 12, color: C.accent, marginTop: 10, fontWeight: 600 }}>
-                        📋 Tap to view full details & history →
-                      </div>
+                      
                     </Card>
                   );
                 })}
