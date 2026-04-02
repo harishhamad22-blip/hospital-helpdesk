@@ -8,6 +8,7 @@ import {
   collection, addDoc, getDocs, doc, updateDoc, deleteDoc,
   onSnapshot, query, orderBy, serverTimestamp, setDoc, getDoc
 } from 'firebase/firestore';
+import chrclogo from '../src/chrclogo.png';
 
 // ╔══════════════════════════════════════════════════════════════╗
 // ║   CHOITHRAM HOSPITAL & RESEARCH CENTRE                       ║
@@ -22,36 +23,36 @@ const WHATSAPP_GROUP_LINK = 'https://chat.whatsapp.com/YOUR_GROUP_INVITE_CODE';
 
 // CallMeBot config (optional - fill if you use CallMeBot)
 // To use: register your number at https://www.callmebot.com/blog/free-api-whatsapp-messages/
-const CALLMEBOT_PHONE   = '';   // e.g. '919876543210' (country code + number, no +)
+const CALLMEBOT_PHONE = '';   // e.g. '919876543210' (country code + number, no +)
 const CALLMEBOT_API_KEY = '';   // API key from CallMeBot registration
 
 // ── DEPARTMENTS ───────────────────────────────────────────────
 const DEPARTMENTS = [
-  "Wing B 311 (Discharge Summary)","Wing B 312","Wing B 314","Wing B 315","Wing B 316 (General Ward)",
-  "Wing B 317","Wing B 318","General/Semi Nursing Counter","Nursing Counter","Burn Unit","Wing A Nursing Station",
-  "HDU (307)","306","305","Genral Ward (304)","303","302","Procedure Room","301","Isolation Room (308)",
-  "Doctor Duty Room","310","Colonoscopy (343)","Day Care (342)","341","340","Wing C Nursing Counter",
-  "Doctor Duty Room (339)","HDU","CTG","Labour Room","Quality (254)","Organ Transplant Unit (RTU)",
-  "Wing F Nursing Counter","Wing E Nursing Counter","Nursing Office","Store Room","Super Delux Counter",
-  "Transplant Bone Marrow","ASW Nursing Counter","ASW Ward","OT Reception","OT Counsling Room",
-  "OT Technician Room","OT Recovery","Operation Theatre (OT-1)","Operation Theatre (OT-2)",
-  "Operation Theatre (OT-3)","Operation Theatre (OT-4)","Operation Theatre (OT-5)","Operation Theatre (OT-6)",
-  "Operation Theatre (OT-7)","Operation Theatre (OT-8)","Operation Theatre (OT-9)","OT Store",
-  "CCU Billing Counter","CCU Main Ward Counter","Cath Lab","Cath Lab Counselling Room","Doctor Lounge",
-  "PICU","NICU","NICU Counter (Reception)","Seminar Room","ICU A Block","ICU B Block","ICU Counter",
-  "Pathalogy","Microscopy 1","Microscopy 2","IHC Frozen Room","Histopathalogy","Section Cutting",
-  "PCR Room","Master mix Room","TB Room","Ethics Committee","Clinical Research","Blood Bank",
-  "Sample Collection","CSSD","IT Hardware","IT Training","IT Department","Digital Marketing",
-  "Endoscopy Counselling Room","Endoscopy OT 1","Endoscopy OT 2","Endoscopy OT 3","Endoscopy Billing Counter",
-  "West Wing Recovery Room","Dialysis Billing Counter","Dialysis Unit","Dialysis New Counter",
-  "MRD","Billing","Revisit","Corporate Department","Xray","Xray Reporting Room","MRI Console",
-  "Reporting Room (Old)","Admission Counter","Audit","Front Counter",
-  "OPD 1","OPD 2","OPD 3","OPD 4","OPD 5","OPD 6","OPD 7","OPD 8","OPD 9","OPD 10",
-  "OPD 11","OPD 12","OPD 12A","OPD 14","OPD 15","OPD 16","OPD 17","OPD 18","OPD 19","OPD 20",
-  "OPD 21","OPD 22","OPD 23","OPD 24","OPD 25","OPD 26","OPD 27","OPD 28","OPD 29","OPD 30",
-  "OPD 31","OPD 32","OPD 33","OPD 34","OPD 35","OPD 36","OPD 37","OPD 38","OPD 39","OPD 40",
-  "OPD 41","OPD 42","Enquiry","Chairman's Office","HR Department","Canteen","Physiotherapy",
-  "Nuclear Medicine","Sonography","Security Office","Project Office","House Keeping","Trust Office","Library"
+  "Wing B 311 (Discharge Summary)", "Wing B 312", "Wing B 314", "Wing B 315", "Wing B 316 (General Ward)",
+  "Wing B 317", "Wing B 318", "General/Semi Nursing Counter", "Nursing Counter", "Burn Unit", "Wing A Nursing Station",
+  "HDU (307)", "306", "305", "Genral Ward (304)", "303", "302", "Procedure Room", "301", "Isolation Room (308)",
+  "Doctor Duty Room", "310", "Colonoscopy (343)", "Day Care (342)", "341", "340", "Wing C Nursing Counter",
+  "Doctor Duty Room (339)", "HDU", "CTG", "Labour Room", "Quality (254)", "Organ Transplant Unit (RTU)",
+  "Wing F Nursing Counter", "Wing E Nursing Counter", "Nursing Office", "Store Room", "Super Delux Counter",
+  "Transplant Bone Marrow", "ASW Nursing Counter", "ASW Ward", "OT Reception", "OT Counsling Room",
+  "OT Technician Room", "OT Recovery", "Operation Theatre (OT-1)", "Operation Theatre (OT-2)",
+  "Operation Theatre (OT-3)", "Operation Theatre (OT-4)", "Operation Theatre (OT-5)", "Operation Theatre (OT-6)",
+  "Operation Theatre (OT-7)", "Operation Theatre (OT-8)", "Operation Theatre (OT-9)", "OT Store",
+  "CCU Billing Counter", "CCU Main Ward Counter", "Cath Lab", "Cath Lab Counselling Room", "Doctor Lounge",
+  "PICU", "NICU", "NICU Counter (Reception)", "Seminar Room", "ICU A Block", "ICU B Block", "ICU Counter",
+  "Pathalogy", "Microscopy 1", "Microscopy 2", "IHC Frozen Room", "Histopathalogy", "Section Cutting",
+  "PCR Room", "Master mix Room", "TB Room", "Ethics Committee", "Clinical Research", "Blood Bank",
+  "Sample Collection", "CSSD", "IT Hardware", "IT Training", "IT Department", "Digital Marketing",
+  "Endoscopy Counselling Room", "Endoscopy OT 1", "Endoscopy OT 2", "Endoscopy OT 3", "Endoscopy Billing Counter",
+  "West Wing Recovery Room", "Dialysis Billing Counter", "Dialysis Unit", "Dialysis New Counter",
+  "MRD", "Billing", "Revisit", "Corporate Department", "Xray", "Xray Reporting Room", "MRI Console",
+  "Reporting Room (Old)", "Admission Counter", "Audit", "Front Counter",
+  "OPD 1", "OPD 2", "OPD 3", "OPD 4", "OPD 5", "OPD 6", "OPD 7", "OPD 8", "OPD 9", "OPD 10",
+  "OPD 11", "OPD 12", "OPD 12A", "OPD 14", "OPD 15", "OPD 16", "OPD 17", "OPD 18", "OPD 19", "OPD 20",
+  "OPD 21", "OPD 22", "OPD 23", "OPD 24", "OPD 25", "OPD 26", "OPD 27", "OPD 28", "OPD 29", "OPD 30",
+  "OPD 31", "OPD 32", "OPD 33", "OPD 34", "OPD 35", "OPD 36", "OPD 37", "OPD 38", "OPD 39", "OPD 40",
+  "OPD 41", "OPD 42", "Enquiry", "Chairman's Office", "HR Department", "Canteen", "Physiotherapy",
+  "Nuclear Medicine", "Sonography", "Security Office", "Project Office", "House Keeping", "Trust Office", "Library"
 ];
 
 const USERNAMES_RAW = `sagar.pathak,deepak.shelke,sunil.chandiwal,deepali.holkar,shubham.jain,sumit.nandedkar,anil.lakhwani,priyesh.vishwakarma,dheeraj.baluchi,aadesh.kumar,samir.das,nitin.sharma,sweta.akundi,vikramaditya.singh,dipanjali.nath,lakshi.maurya,ajit.ranjan,piyush.ghagre,rani.bisht,ranjana.yadav,dharmishta.rajput,indresh.chandele,shobha.chamania,vinay.prajapat,rajpal.singh,arpit.sethiya,ashish.goyal,vidyut.jain,mayank.cardio,hemlata.bareniya,narsi.reddy,vishal.panwar,sahil.parashar,pushpendra.joshi,sudhanshu.agnihotri,pawan.thada,shikha.mandloi,sumit.laley,avijit.mitra,vishal.patidar,bharti.malviya,chanda.purohit,arjun.maru,harsh.jakhetia,dinesh.mishra,shraddha.namjoshi,manoj.manjhi,avinash.sharma,alka.jain,ashish.patidar,aakansha.kaushal,samuel.pappachan,sachin.yadav,deepika.rathore,jitendra.joshi,manisha.rode,tinkesh.khandare,pooja.patidar,anurag.mourya,kanhaiya.mehra,girish.mandloi,bhawna.bhagwat,jitendra.tamraka,kunal.adhyaru,lokendra.patel,shubham.upadhyay,roshi.lanjewar,bs.thakur,nishant.shrivastava,sumit.singh,amber.mittal,priyank.shah,mayank.gastro,anjali.sharma,c.chamania,neela.oza,sarla.budhwani,navjot.saluja,ritika.jindal,prashant.srivastava,mayank.gusain,sandeep.rathore,divyansh.jain,arpit.jain,rohini.aktari,shubhangi.rawat,ruby.sengar,savita.agashe,rahul.bohat,ajay.patidar,harish.hamad,mukesh.meena,ganesh.yadav,dinesh.kumawat,madhuri.sahu,ambuj.jain,jitendra.dayaramani,anil.chauhan,gourav.pawar,rahul.kuwal,nitin.saxena,ravi.sahu,ankit.sharma,anand.meena,sapna.shukla,swapnil.jorvekar,supraja.vasu,farheen.ali,maya.varma,vinay.dubey,savan.agrwal,komal.pancholi,amit.deora,kedar.choudhary,pratik.khillari,mohan.yadav,priyanka.tiwari,mayuresh.hinduja,neha.rai,j.s.kathpal,ankitt.solanki,aniket.panwar,aayushi.mandloi,dhanraj.panjwani,mayur.sonare,neha.verma,bharat.sharma,dushyant.motiani,satish.motiani,deepika.jain,anamika.bhand,nilima.bhide,khushi.sen,sandeep.bhargava,deepak.pandit,shyamal.pal,sandeep.shivde,mayank.rathod,ravindra.kumar,rahul.raghuwanshi,shruti.raghuvanshi,raja.thambulkar,itsupport,rohit.jhawar,pratika.thada,nitin.gupta,sailee.jambhekar,deepak.panwar,hemlata.sharma,rajkumar.sangwan,deepak.khetan,prakash.doodhiya,sayli.khandelwal,deepak.patel,harsh.patel,manjeet.shinde,pushkar.dravid,shishank.bhadouriya,vivek.ashokan,kartik.batham,kartik.joshi,chetan.asawara,rashmi.baghel,muskan.kushwah,rahul.vaskale,sonu.surawat,rajkumar.basantani,abha.soni,pooja.dole,ranjeet.kaur,divyanshi.chouhan,akash.dass,purnima.bhale,vibhooti.trivedi,dilesh.sangeliya,sarfraz.khan,sminesh.philip,shivani.panwar,abhik.sikdar,nitika.yadav,richa.agrawal,sameer.nivsarkar,shrikant.phatak,siddharthsingh.chauhan,abhishek.raghuvanshi,saraswati.pandey,chetan.parmar,shivani.jaiswal,anand.sanghi,ratan.sahajpal,supriya.choudhary,shailendra.patel,suresh.carleton,chhabra.sokhey,piyush.joshi,vikram.balwani,alok.kumar,jai.kriplani,neha.agrawal,minakshi.sharma,sushma.jhamad,rajesh.patidar,vikas.asati,ali.saify,ameya.rangnekar,arjun.wadhwani,manoj.dubey,anshul.jaiswal,jenisha.jain,prashant.agrawal,rashmi.shad,shivani.patel,pravesh.kanthed,mahendra.acharya,gaurav.gupta,pradeep.jain,rajendra.aanjne,suruchi.singh,kumashantanu.navlekar,praveen.agrawal,sunanda.samanta,drnaman,parul.baldi,saurabh.duggad,siddharth.saraf,aneeta.patel,sarita.bamniya,princy.nathen,kavita.jatav,chandani.makwana,sarja.khaped,pooja.nargis,megha.sharma,anita.solanki,asha.bandole,kavita.shah,sheetal.kharat,seema.rawat,sonal.chaudhary,santoshi.panika,vina.ovhal,anjali.pal,subhashini.patel,ankita.verma,aruna.bhabar,priyanka.prajapati,divyani.choure,sangeeta.rawat,harsha.nirmal,pooja.dawar,jyoti.shivhare,sitara.bano,priyanka.lohar,roshni.solanki,shraddna.panwar,nandani.chouhan,hemlata.choudhary,jyoti.khatarkar,kirti.yadav,teena.namdev,arti.mandloi,sapna.todarmal,paramjeet.verma,diksha.wadbude,renu.tatware,sayma.chouhan,satendra.singh,rahul.goyal,durgesh.chawda,durga.eske,sharmila.maurya,hinisha.rathod,shubham.tare,ankita.soliwal,jyotshna.songara,pooja.yadav,harsha.duchakke,abhay.patel,aniket.pradhan,anand.malviya,ayush.francis,babulal.godiya,balram.meena,seema.yadav,rahul.parmar,sachin.sharma,sheetal.patel,sonu.prajapat,subhash.shinde,suyash.sisodiya,isha.soni,kaveeta.sharma,kirti.ahire,laxmi.kushwah,mayuri.nagar,minakshi.mehta,monika.verma,aman.piplodiya,anmol.pathak,mayank.naik,pinky.verma,harpreet.kaur,pal.singh,neha.neema,prachi.rathore,pratibha.dewatwal,priyanka.gonker,ravi.bavniya,ruchika.gangrade,sonam.sonare,suraj.dwivedi,vinita.ingle,khushi.meena,sulochana.chandrawat,manisha.jat,yogita.jajme,priyanka.chaporkar,deepali.puranik,amrata.pal,shobha.sharma,barkha.bamaniya,praveena.umbarkar,sangeeta.pardeshi,prateek.jadhav,kumkum.jain,pooja.bahediya,ishika.kathoriya,smita.pandit,reena.bonde,jayshree.supekar,deepati.vishwkarma,pinku.soni,sanjay.patil,aayushi.shambhawani,shyam.malviya,sawan.dharwe,nitika.singh,roshni.kurmi,chhaya.kushwah,anand.wasle,revisit.counter,vipin.kashyap,pawan.meena,vijay.shikarwar,varsha.sharma,anita.sendhalkar,verma.monika,akash.yevale,hemant.meena,mercy.paulose,mohit.sharma,nanda.hemwani,nandini.ahire,navin.patidar,nikita.chouhan,nikita.kharche,padma.tiwari,pramod.raghuwanshi,subhash.sharma,leena.sahu,sagheer.ahmed,prakash.yadav,sangeeta.chouhan,manish.tripathi,matin.ahmed,rahul.muwel,pramod.tiwari,roopali.mourya,bharti.yadav,prachi.sahu,kushboo.kashwap,pramod.mithoriya,shubham.malviya,abhay.dhaigude,vinita.phapunkar,pradeep.dhansore,alka.malviya,divya.panchal,bane.singh,mohan.jat,kanchan.sharma,anita.sharma,vikash.chourasiya,sonu.jat,priya.chouhan,pallavi.chutel,devendra.dubey,divya.bhati,sushmita.sen,aditi.yadav,kavita.toplani,priyanka.joshi,ajay.parmar,twinkle.darwai,sheetal.jain,jaya.badke,akash.ramawat,priyanka.bhagat,pushpalata.gehlot,rahul.jain,raisa.khan,rajendra.lad,raju.pardeshi,rakesh.tomar,robin.bandod,sabiha.ahmed,samarth.solanki,sangeeta.kaushal,satish.phatak,shubham.yadav,shewta.chandorkar,sonali.tapkire,thankmony.nair,vikash.verma,vishaka.rajput,yashita.tanwar,amit.dhurve,rajeshwai.pandhran,sachin.sen,sonakshi.sabnani,sunil.karma,varsha.yadav,mukesh.sharma,snehal.vairagkar,abhinav.gupta,kanish.markam,rupali.pawar,vimal.kumar,mukesh.sonti,kuldeep.saini,rajesh.gurjar,rajesh.mourya,sp.jaiswal,pushkar.joshi,megha.gour,kritika.jain,bidhi.kushwaha,mahima.ochani,sonali.poorkar,rinta.vincent,chhaya.gevare,ramendra.thakur,antim.tegar,taniya.panwar,sanjeev.choudhary,nilesh.tailor,deepak.choudhary,seema.jamod,mamta.sharma,asma.mansuri,ravina.solanki,vandan.solanki,vandana.nilkanth,radha.dawar,maya.verma,raj.kumar,sachin.wagh,sheetal.birthare,anita.vigrodiya,kajal.rajput,rajesh.ingle,hansraj.chouhan,lk.mourya,deepak.shrivastav,shubham.sisodiya,aniket.oad,kedar.rathore,vinod.rathore,bhuwan.gite,rahul.khandekar,shivlal.kushwah,bharti.sain,palak.sharma,laxmi.khilwani,neelam.vishwakarma,anil.shimle,atharva.joglekar,garv.khaturiya,anushka.tiwari,pooja.muzalde,vijay.thakur,daya.galav,satish.uikey,bhoopendra.sharma,ajay.verma,saroj.vishawakarma,rinku.kirade,neetu.amre,priyanka.rawat,pooja.solanki,khushboo.patel,kiran.jamra,kavita.eskey,priya.sahu,papuni.nayak,monika.choudhary,yashooda.shah,lalita.kirade,rekha.verma,pooja.patel,vandana.vish,riya.savner,nimisha.joseph,akriti.patel,somini.thomas,harshita.swami,payal.sahani,chitra.lande,anita.jadhav,chetna.yadav,chavan.rajesh,verma.neha,kanungo.sheel,jitendra.singh,kumkum.katarya,kirti.patel,monika.randa,sonali.vishwakarma,radheshyam.barsker,anil.panwar,ajay.tagore,panwar.anil,rincy.chacko,aagnes.francis,kavita.dangi,neha.chourase,akansha.ninama,anita.chouhan,chhaya.chouhan,aleen.vira,aakanksha.dhurve,rajendra.vishwkarma,priyanka.parashar,shubham.gehlot,priya.patil,rani.nagar,monika.jain,priyanka.jat,miti.jain,kanika.panchal,upma.rathore,sophia.stephon,riya.das,neha.yadav,vijaylaxmi.nair,blessy.john,kabita.laishram,aushi.raikwar,kirti.tiwari,rachana.ruhela,sakshi.sohani,nisha.patidar,karuna.singad,bharti.gandhare,kiran.rathore,divya.sahu,kavita.patil,satish.dohre,karishma.yadav,reena.bhuriya,shalom.maseeh,rameela.mujalde,nuri.barde,chanda.solanki,pooja.gujre,vandna.dawar,chhaya.gurjar,anju.chandran,roshan.mourya,vipin.patel,sanjay.soni,sunil.singh,jaya.barfa,pankaj.chouhan,vaishali.rathore,priya.yadav,pradeep.mansore,mvr,pravin.soni,ritu.sikligar,naresh.bharti,sarthak.shrivastava,manshi.bijore,ravi.nagar,pradeep.gupta,asw1,dranilkumar,burnunit,cathlab,xray,deluxeward,dialysis,drpraveen,endoscopy,entopd,cicu,femaleward,maleward,neuro,nsw1,gynward,otchrc,paedicu,painopd,pvtward,rad11,rad1.dept,itdept,respilab,drsunanda,micu,rad9,dryogesh,ortho,drshailesh,jitendra.patidar,vini.jhariya,namrata.awasarkar,deepak.sadh,samyak.pancholi,atul.tiwari,lalu.yadav,aleena.soby,muskan.uprale,jitendra.prajapat,maharban.kanesh,dilip.chourasia,gopal.hirlakar,rajesh.yadav,deepak.jaiswal,manoj.hardiya,deepak.mourya,manju.chouhan,kalsing.barde,yogesh.parmar,joy.jisha,kunta.barela,jasma.solanki,ashish.victor,jasslin.verghese,alvi.thomas,jissa.abraham,surbhi.makode,shivani.chouhan,nandini.sharma,rekha.rathore,sunil.malviya,arti.kochale,neha.upadhyay,sofiya.parveen,varsha.kharari,niharika.baraskar,mahima.rathore,aarti.khede,jaya.bariya,preeti.sawner,seemita.yadav,anuradha.dodiya,manjuri.chatterjee,priyanka.prajapat,sonal.yadav,nitu.gupta,reesa.mariam,sherin.anna,minal.bondane,surendra.nayak,shefali.narware,lata.panwar,shivani.mourya,josna.joseph,sheetal.solanki,sherin.shaji,retam.ajnar,ravina.malviya,chouhan.abhishek,neelam.sharma,anjali.jamnik,diksha.jharbade,ishika.devid,dipika.patel,vandana.vishwakarma,poonam.more,kavita.bhawar,shivani.bachhave,seema.dodve,pinky.bamniya,ranu.varma,nisha.patel,raksha.rathore,gokul.rathode,purnima.gupta,sheeta.pateliya,paritosh.rajput,anjali.vishwakarma,surbhi.narware,lalita.solanki,varsha.rathore,nisha.mariyam,aksha.rajan,swati.mujalde,ritu.chouhan,saloni.bhargav,arjun.akhadiya,rajni.chouhan,sonalika.dawar,pooja.morya,hiramani.gehlot,diksha.malviya,sajna.bamniya,ajay.panchal,mithun.chouhan,vikas.patidar,shivani.namdev,rohit.gandhwane,ravindra.solanki,shireen.sheikh,abhishek.agrawal,rekha.choudhary,sandhya.vishwakarmaa,ananya.sharma,ramesh.dawar,lalit.tanwar,anubhav.pandey,huzefa.kachchawala,avani.mahajan,sanyukta.vishnar,dhruvika.joshi,purva.rathore,abhishek.meena,ved.prakash,siddharth.chauhan,gouri.passi,harish.laad,hema.sharma,ankit.yadav,namrata.choudhary,saibaba.suvarna,support.suvarna,yash.tripathi,yashvini.verma`;
@@ -81,15 +82,15 @@ const INITIAL_USERS = buildInitialUsers();
 
 const COMPLAINT_TYPES = ['Hardware', 'Network', 'Software', 'Printer', 'PC Shifting'];
 const PRINTER_SUBTYPES = ['Black & White Printer', 'Color Printer', 'Ink Refill', 'Barcode Printer', 'Scanner', 'Barcode Reader'];
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // Statuses: open → hold / resolve / refuse → close
 const STATUS_CFG = {
-  open:    { label: 'Open',     color: '#1e40af', bg: '#dbeafe', dot: '#3b82f6', icon: '🔵' },
-  hold:    { label: 'On Hold',  color: '#92400e', bg: '#fef3c7', dot: '#f59e0b', icon: '⏸️' },
-  resolved:{ label: 'Resolved', color: '#065f46', bg: '#d1fae5', dot: '#10b981', icon: '✅' },
-  refused: { label: 'Refused',  color: '#991b1b', bg: '#fee2e2', dot: '#ef4444', icon: '❌' },
-  closed:  { label: 'Closed',   color: '#374151', bg: '#f3f4f6', dot: '#9ca3af', icon: '🔒' },
+  open: { label: 'Open', color: '#1e40af', bg: '#dbeafe', dot: '#3b82f6', icon: '🔵' },
+  hold: { label: 'On Hold', color: '#92400e', bg: '#fef3c7', dot: '#f59e0b', icon: '⏸️' },
+  resolved: { label: 'Resolved', color: '#065f46', bg: '#d1fae5', dot: '#10b981', icon: '✅' },
+  refused: { label: 'Refused', color: '#991b1b', bg: '#fee2e2', dot: '#ef4444', icon: '❌' },
+  closed: { label: 'Closed', color: '#374151', bg: '#f3f4f6', dot: '#9ca3af', icon: '🔒' },
 };
 
 // ── WHATSAPP NOTIFICATION ─────────────────────────────────────
@@ -263,12 +264,12 @@ input,select,textarea,button{font-family:'DM Sans',sans-serif;}
 function Btn({ children, onClick, variant = 'primary', size = 'md', style = {}, disabled = false, type = 'button' }) {
   const vs = {
     primary: { background: `linear-gradient(135deg,#0a1628,#1a3a6b)`, color: '#fff', border: '1px solid #1a3a6b', boxShadow: '0 2px 8px #0a162830' },
-    gold:    { background: `linear-gradient(135deg,#b8860b,#c9a84c,#e8c96c)`, color: '#0a1628', border: '1px solid #c9a84c', boxShadow: '0 2px 8px #c9a84c40', fontWeight: 700 },
+    gold: { background: `linear-gradient(135deg,#b8860b,#c9a84c,#e8c96c)`, color: '#0a1628', border: '1px solid #c9a84c', boxShadow: '0 2px 8px #c9a84c40', fontWeight: 700 },
     success: { background: `linear-gradient(135deg,#064e3b,#065f46)`, color: '#fff', border: 'none', boxShadow: '0 1px 4px #06594640' },
-    danger:  { background: `linear-gradient(135deg,#7f1d1d,#991b1b)`, color: '#fff', border: 'none', boxShadow: '0 1px 4px #99121240' },
+    danger: { background: `linear-gradient(135deg,#7f1d1d,#991b1b)`, color: '#fff', border: 'none', boxShadow: '0 1px 4px #99121240' },
     warning: { background: `linear-gradient(135deg,#92400e,#b45309)`, color: '#fff', border: 'none', boxShadow: '0 1px 4px #b4530940' },
-    purple:  { background: `linear-gradient(135deg,#5b21b6,#7c3aed)`, color: '#fff', border: 'none', boxShadow: '0 1px 4px #7c3aed40' },
-    ghost:   { background: 'transparent', color: C.muted, border: `1px solid ${C.border2}` },
+    purple: { background: `linear-gradient(135deg,#5b21b6,#7c3aed)`, color: '#fff', border: 'none', boxShadow: '0 1px 4px #7c3aed40' },
+    ghost: { background: 'transparent', color: C.muted, border: `1px solid ${C.border2}` },
     outline: { background: 'transparent', color: C.accent, border: `1.5px solid ${C.accent}` },
   };
   const ss = {
@@ -278,8 +279,10 @@ function Btn({ children, onClick, variant = 'primary', size = 'md', style = {}, 
   };
   return (
     <button type={type} onClick={onClick} disabled={disabled}
-      style={{ ...vs[variant], ...ss[size], fontWeight: 600, cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? .55 : 1, transition: 'all .18s', letterSpacing: .2, ...style }}>
+      style={{
+        ...vs[variant], ...ss[size], fontWeight: 600, cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? .55 : 1, transition: 'all .18s', letterSpacing: .2, ...style
+      }}>
       {children}
     </button>
   );
@@ -296,8 +299,10 @@ function Card({ children, style = {}, className = '' }) {
 function Badge({ status }) {
   const m = STATUS_CFG[status] || { label: status, color: C.muted, bg: '#f1f5f9', dot: C.muted, icon: '•' };
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 99,
-      fontSize: 11, fontWeight: 700, color: m.color, background: m.bg, letterSpacing: .3 }}>
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 99,
+      fontSize: 11, fontWeight: 700, color: m.color, background: m.bg, letterSpacing: .3
+    }}>
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.dot, flexShrink: 0 }} />
       {m.label.toUpperCase()}
     </span>
@@ -306,12 +311,16 @@ function Badge({ status }) {
 
 function StatCard({ icon, label, value, color, bg }) {
   return (
-    <div className="fadeUp" style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16,
-      padding: '20px 22px', flex: 1, minWidth: 150, boxShadow: '0 2px 12px #0a162808', position: 'relative', overflow: 'hidden' }}>
+    <div className="fadeUp" style={{
+      background: C.card, border: `1px solid ${C.border}`, borderRadius: 16,
+      padding: '20px 22px', flex: 1, minWidth: 150, boxShadow: '0 2px 12px #0a162808', position: 'relative', overflow: 'hidden'
+    }}>
       <div style={{ position: 'absolute', top: 0, right: 0, width: 80, height: 80, borderRadius: '0 16px 0 80px', background: bg, opacity: .4 }} />
-      <div style={{ width: 44, height: 44, borderRadius: 12, background: bg,
+      <div style={{
+        width: 44, height: 44, borderRadius: 12, background: bg,
         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, marginBottom: 14,
-        border: `1px solid ${color}22` }}>{icon}</div>
+        border: `1px solid ${color}22`
+      }}>{icon}</div>
       <div style={{ fontSize: 32, fontWeight: 700, color, fontFamily: "'JetBrains Mono',monospace", lineHeight: 1 }}>{value}</div>
       <div style={{ fontSize: 12, color: C.muted, marginTop: 6, fontWeight: 500, letterSpacing: .3 }}>{label}</div>
     </div>
@@ -321,18 +330,26 @@ function StatCard({ icon, label, value, color, bg }) {
 function Modal({ open, onClose, title, children, width = 520 }) {
   if (!open) return null;
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#0a162880', zIndex: 1000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, backdropFilter: 'blur(4px)' }}
+    <div style={{
+      position: 'fixed', inset: 0, background: '#0a162880', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, backdropFilter: 'blur(4px)'
+    }}
       onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="fadeUp" style={{ background: C.card, borderRadius: 20, width: '100%', maxWidth: width,
-        maxHeight: '90vh', overflow: 'auto', boxShadow: '0 30px 80px #0a162840' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      <div className="fadeUp" style={{
+        background: C.card, borderRadius: 20, width: '100%', maxWidth: width,
+        maxHeight: '90vh', overflow: 'auto', boxShadow: '0 30px 80px #0a162840'
+      }}>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: '18px 24px', borderBottom: `1px solid ${C.border}`,
-          background: `linear-gradient(135deg,${C.navy},${C.navy3})`, borderRadius: '20px 20px 0 0' }}>
+          background: `linear-gradient(135deg,${C.navy},${C.navy3})`, borderRadius: '20px 20px 0 0'
+        }}>
           <span style={{ fontWeight: 700, fontSize: 16, color: '#fff', fontFamily: "'Cormorant Garamond',serif", letterSpacing: .5 }}>{title}</span>
-          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.15)', border: 'none',
+          <button onClick={onClose} style={{
+            background: 'rgba(255,255,255,0.15)', border: 'none',
             color: '#fff', fontSize: 20, cursor: 'pointer', lineHeight: 1, width: 30, height: 30,
-            borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+            borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>×</button>
         </div>
         <div style={{ padding: 24 }}>{children}</div>
       </div>
@@ -342,8 +359,10 @@ function Modal({ open, onClose, title, children, width = 520 }) {
 
 function FieldLabel({ children, required }) {
   return (
-    <label style={{ display: 'block', fontSize: 11, color: C.muted, marginBottom: 6, fontWeight: 700,
-      letterSpacing: .6, textTransform: 'uppercase' }}>
+    <label style={{
+      display: 'block', fontSize: 11, color: C.muted, marginBottom: 6, fontWeight: 700,
+      letterSpacing: .6, textTransform: 'uppercase'
+    }}>
       {children}{required && <span style={{ color: C.red }}> *</span>}
     </label>
   );
@@ -380,18 +399,24 @@ function SearchDropdown({ label, value, onChange, options, placeholder = 'Search
           placeholder={value || placeholder}
           style={{ ...inputStyle, paddingRight: 38 }}
         />
-        <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-          color: C.muted, fontSize: 11, pointerEvents: 'none' }}>{open ? '▲' : '▼'}</span>
+        <span style={{
+          position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+          color: C.muted, fontSize: 11, pointerEvents: 'none'
+        }}>{open ? '▲' : '▼'}</span>
       </div>
       {open && filtered.length > 0 && (
-        <div className="slideDown" style={{ position: 'absolute', zIndex: 300, background: C.card,
+        <div className="slideDown" style={{
+          position: 'absolute', zIndex: 300, background: C.card,
           border: `1.5px solid ${C.border2}`, borderRadius: 12, marginTop: 3,
-          maxHeight: 220, overflow: 'auto', boxShadow: '0 12px 32px #0a162820', width: '100%', left: 0 }}>
+          maxHeight: 220, overflow: 'auto', boxShadow: '0 12px 32px #0a162820', width: '100%', left: 0
+        }}>
           {filtered.map(o => (
             <div key={o} onMouseDown={() => { onChange(o); setOpen(false); setQ(''); }}
-              style={{ padding: '9px 14px', cursor: 'pointer', fontSize: 13, color: C.text,
+              style={{
+                padding: '9px 14px', cursor: 'pointer', fontSize: 13, color: C.text,
                 background: value === o ? C.blueL : 'transparent', fontWeight: value === o ? 600 : 400,
-                transition: 'background .1s', borderRadius: 4 }}
+                transition: 'background .1s', borderRadius: 4
+              }}
               onMouseEnter={e => { if (value !== o) e.currentTarget.style.background = '#f0f4ff'; }}
               onMouseLeave={e => { if (value !== o) e.currentTarget.style.background = 'transparent'; }}>
               {o}
@@ -411,12 +436,16 @@ function Timeline({ history }) {
       {history.map((h, i) => (
         <div key={i} style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, width: 22 }}>
-            <div style={{ width: 14, height: 14, borderRadius: '50%',
+            <div style={{
+              width: 14, height: 14, borderRadius: '50%',
               background: STATUS_CFG[h.status]?.dot || C.muted, marginTop: 3,
-              boxShadow: `0 0 0 4px ${STATUS_CFG[h.status]?.bg || '#f1f5f9'}`, flexShrink: 0 }} />
+              boxShadow: `0 0 0 4px ${STATUS_CFG[h.status]?.bg || '#f1f5f9'}`, flexShrink: 0
+            }} />
             {i < history.length - 1 && (
-              <div style={{ width: 2, flex: 1, background: `linear-gradient(${STATUS_CFG[h.status]?.dot || C.muted},${C.border})`,
-                margin: '5px 0', minHeight: 20 }} />
+              <div style={{
+                width: 2, flex: 1, background: `linear-gradient(${STATUS_CFG[h.status]?.dot || C.muted},${C.border})`,
+                margin: '5px 0', minHeight: 20
+              }} />
             )}
           </div>
           <div style={{ flex: 1, paddingBottom: 4 }}>
@@ -424,16 +453,20 @@ function Timeline({ history }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <Badge status={h.status} />
                 {h.actionBy && (
-                  <span style={{ fontSize: 11, background: C.navy, color: '#fff', borderRadius: 99,
-                    padding: '2px 9px', fontWeight: 600 }}>
+                  <span style={{
+                    fontSize: 11, background: C.navy, color: '#fff', borderRadius: 99,
+                    padding: '2px 9px', fontWeight: 600
+                  }}>
                     👤 {h.actionBy}
                   </span>
                 )}
               </div>
               <span style={{ fontSize: 11, color: C.muted, fontFamily: "'JetBrains Mono',monospace" }}>{fmtDT(h.at)}</span>
             </div>
-            <div style={{ background: STATUS_CFG[h.status]?.bg || C.off, borderRadius: 10, padding: '10px 13px',
-              border: `1px solid ${STATUS_CFG[h.status]?.dot || C.border}22` }}>
+            <div style={{
+              background: STATUS_CFG[h.status]?.bg || C.off, borderRadius: 10, padding: '10px 13px',
+              border: `1px solid ${STATUS_CFG[h.status]?.dot || C.border}22`
+            }}>
               <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.6 }}>{h.note}</div>
               {h.by && <div style={{ fontSize: 11, color: C.muted, marginTop: 5, fontWeight: 600 }}>Submitted by: {h.by}</div>}
             </div>
@@ -448,9 +481,11 @@ function Timeline({ history }) {
 function BroadcastBanner({ message }) {
   if (!message || !message.active || !message.message) return null;
   return (
-    <div style={{ background: `linear-gradient(135deg,#7c3aed,#5b21b6)`,
+    <div style={{
+      background: `linear-gradient(135deg,#7c3aed,#5b21b6)`,
       padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14,
-      boxShadow: '0 4px 16px #7c3aed40' }}>
+      boxShadow: '0 4px 16px #7c3aed40'
+    }}>
       <span style={{ fontSize: 20, flexShrink: 0 }}>📢</span>
       <div style={{ flex: 1 }}>
         <div style={{ color: '#fff', fontWeight: 700, fontSize: 12, letterSpacing: .5, opacity: .8, marginBottom: 2 }}>
@@ -537,33 +572,65 @@ function LoginPage({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: `linear-gradient(150deg,${C.navy} 0%,#0d2550 40%,#1a4080 70%,#0a2240 100%)`,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 20, position: 'relative', overflow: 'hidden' }}>
+    <div style={{
+      minHeight: '100vh', background: `linear-gradient(150deg,${C.navy} 0%,#0d2550 40%,#1a4080 70%,#0a2240 100%)`,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 20, position: 'relative', overflow: 'hidden'
+    }}>
       <style>{GS}</style>
-      <div style={{ position: 'fixed', top: -150, right: -150, width: 500, height: 500, borderRadius: '50%',
-        background: 'radial-gradient(circle,#c9a84c15,transparent 70%)', pointerEvents: 'none' }} />
-      <div style={{ position: 'fixed', bottom: -100, left: -100, width: 400, height: 400, borderRadius: '50%',
-        background: 'radial-gradient(circle,#1a56db20,transparent 70%)', pointerEvents: 'none' }} />
+      <div style={{
+        position: 'fixed', top: -150, right: -150, width: 500, height: 500, borderRadius: '50%',
+        background: 'radial-gradient(circle,#c9a84c15,transparent 70%)', pointerEvents: 'none'
+      }} />
+      <div style={{
+        position: 'fixed', bottom: -100, left: -100, width: 400, height: 400, borderRadius: '50%',
+        background: 'radial-gradient(circle,#1a56db20,transparent 70%)', pointerEvents: 'none'
+      }} />
 
       <div className="fadeUp" style={{ width: '100%', maxWidth: 440 }}>
         {/* Branding */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 80, height: 80, borderRadius: 24,
-            background: 'linear-gradient(135deg,rgba(201,168,76,0.2),rgba(201,168,76,0.05))',
-            backdropFilter: 'blur(10px)', marginBottom: 18, fontSize: 38,
-            border: '1px solid rgba(201,168,76,0.3)', boxShadow: '0 0 30px rgba(201,168,76,0.15)' }}>
-            🏥
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 80,
+              height: 80,
+              borderRadius: 24,
+              background:
+                'linear-gradient(135deg,rgba(201,168,76,0.2),rgba(201,168,76,0.05))',
+              backdropFilter: 'blur(10px)',
+              marginBottom: 18,
+              border: '1px solid rgba(201,168,76,0.3)',
+              boxShadow: '0 0 30px rgba(201,168,76,0.15)',
+              overflow: 'hidden'
+            }}
+          >
+            <img
+              src={chrclogo}
+              alt="Logo"
+              style={{
+                width: 38,
+                height: 38,
+                objectFit: 'contain'
+              }}
+            />
           </div>
-          <h1 style={{ color: '#fff', fontSize: 24, fontWeight: 700, lineHeight: 1.3, marginBottom: 6,
-            fontFamily: "'Cormorant Garamond',serif", letterSpacing: .5 }}>
+          <h1 style={{
+            color: '#fff', fontSize: 24, fontWeight: 700, lineHeight: 1.3, marginBottom: 6,
+            fontFamily: "'Cormorant Garamond',serif", letterSpacing: .5
+          }}>
             Choithram Hospital &<br />Research Centre
           </h1>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8,
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
             background: 'rgba(201,168,76,0.15)', backdropFilter: 'blur(10px)', borderRadius: 99,
-            padding: '6px 18px', border: '1px solid rgba(201,168,76,0.3)', marginTop: 8 }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981',
-              animation: 'pulse 2s infinite', display: 'inline-block' }} />
+            padding: '6px 18px', border: '1px solid rgba(201,168,76,0.3)', marginTop: 8
+          }}>
+            <span style={{
+              width: 7, height: 7, borderRadius: '50%', background: '#10b981',
+              animation: 'pulse 2s infinite', display: 'inline-block'
+            }} />
             <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: 600, letterSpacing: .8 }}>
               IT HARDWARE HELPDESK
             </span>
@@ -574,17 +641,21 @@ function LoginPage({ onLogin }) {
         <div style={{ display: 'flex', background: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: 4, marginBottom: 16, gap: 4 }}>
           {[['login', '🔑 Sign In'], ['forgot', '🔓 Forgot Password']].map(([k, l]) => (
             <button key={k} onClick={() => { setTab(k); setError(''); setFpError(''); setFpSuccess(''); }}
-              style={{ flex: 1, padding: '9px 12px', borderRadius: 11, border: 'none', cursor: 'pointer',
+              style={{
+                flex: 1, padding: '9px 12px', borderRadius: 11, border: 'none', cursor: 'pointer',
                 background: tab === k ? '#fff' : 'transparent',
                 color: tab === k ? C.navy : 'rgba(255,255,255,0.7)',
-                fontWeight: 700, fontSize: 13, transition: 'all .2s' }}>
+                fontWeight: 700, fontSize: 13, transition: 'all .2s'
+              }}>
               {l}
             </button>
           ))}
         </div>
 
-        <div style={{ background: 'rgba(255,255,255,0.97)', borderRadius: 24, padding: 32,
-          boxShadow: '0 30px 80px rgba(0,0,0,0.4),0 0 0 1px rgba(201,168,76,0.2)' }}>
+        <div style={{
+          background: 'rgba(255,255,255,0.97)', borderRadius: 24, padding: 32,
+          boxShadow: '0 30px 80px rgba(0,0,0,0.4),0 0 0 1px rgba(201,168,76,0.2)'
+        }}>
 
           {tab === 'login' ? (
             <>
@@ -607,29 +678,37 @@ function LoginPage({ onLogin }) {
                     placeholder="Enter your password"
                     style={{ ...inputStyle, paddingRight: 46 }} />
                   <button onClick={() => setShowPw(s => !s)}
-                    style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-                      background: 'none', border: 'none', cursor: 'pointer', color: C.muted, fontSize: 17, lineHeight: 1 }}>
+                    style={{
+                      position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                      background: 'none', border: 'none', cursor: 'pointer', color: C.muted, fontSize: 17, lineHeight: 1
+                    }}>
                     {showPw ? '🙈' : '👁️'}
                   </button>
                 </div>
               </div>
               {!initDone && (
-                <div style={{ background: '#f0f9ff', border: `1px solid #bae6fd`, borderRadius: 9,
-                  padding: '9px 13px', color: '#0369a1', fontSize: 12, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{
+                  background: '#f0f9ff', border: `1px solid #bae6fd`, borderRadius: 9,
+                  padding: '9px 13px', color: '#0369a1', fontSize: 12, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center'
+                }}>
                   <span className="pulse">⚙️</span> Connecting to database...
                 </div>
               )}
               {error && (
-                <div style={{ background: C.redL, border: `1px solid #fca5a5`, borderRadius: 9,
-                  padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 12, fontWeight: 500 }}>
+                <div style={{
+                  background: C.redL, border: `1px solid #fca5a5`, borderRadius: 9,
+                  padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 12, fontWeight: 500
+                }}>
                   ⚠️ {error}
                 </div>
               )}
               <Btn onClick={handleLogin} disabled={loading || !initDone} style={{ width: '100%', marginTop: 16, padding: '14px' }} size="lg" variant="primary">
                 {loading ? '⏳ Signing in...' : 'Sign In →'}
               </Btn>
-              <div style={{ marginTop: 20, padding: '14px 16px', background: `linear-gradient(135deg,${C.goldL},#fff9e6)`,
-                borderRadius: 10, border: `1px solid #e8d5a3` }}>
+              <div style={{
+                marginTop: 20, padding: '14px 16px', background: `linear-gradient(135deg,${C.goldL},#fff9e6)`,
+                borderRadius: 10, border: `1px solid #e8d5a3`
+              }}>
                 <p style={{ textAlign: 'center', fontSize: 12, color: '#92400e', fontWeight: 500 }}>
                   🔑 Default password: <span style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, color: '#7c2d12' }}>Chrc@1234</span>
                   <br /><span style={{ color: C.muted, fontSize: 11 }}>You'll be asked to change it on first login</span>
@@ -659,14 +738,18 @@ function LoginPage({ onLogin }) {
                   placeholder="Re-enter new password" style={inputStyle} />
               </div>
               {fpError && (
-                <div style={{ background: C.redL, border: `1px solid #fca5a5`, borderRadius: 9,
-                  padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 12, fontWeight: 500 }}>
+                <div style={{
+                  background: C.redL, border: `1px solid #fca5a5`, borderRadius: 9,
+                  padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 12, fontWeight: 500
+                }}>
                   ⚠️ {fpError}
                 </div>
               )}
               {fpSuccess && (
-                <div style={{ background: C.greenL, border: `1px solid #a7f3d0`, borderRadius: 9,
-                  padding: '10px 14px', color: C.green, fontSize: 12, marginBottom: 12, fontWeight: 600 }}>
+                <div style={{
+                  background: C.greenL, border: `1px solid #a7f3d0`, borderRadius: 9,
+                  padding: '10px 14px', color: C.green, fontSize: 12, marginBottom: 12, fontWeight: 600
+                }}>
                   ✅ {fpSuccess}
                 </div>
               )}
@@ -704,8 +787,10 @@ function ChangePasswordPage({ user, onDone, onLogout }) {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: `linear-gradient(150deg,${C.navy},#0d2550,#1a4080)`,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+    <div style={{
+      minHeight: '100vh', background: `linear-gradient(150deg,${C.navy},#0d2550,#1a4080)`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
+    }}>
       <style>{GS}</style>
       <div className="fadeUp" style={{ width: '100%', maxWidth: 420 }}>
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
@@ -727,13 +812,17 @@ function ChangePasswordPage({ user, onDone, onLogout }) {
               onKeyDown={e => e.key === 'Enter' && handle()}
               placeholder="Re-enter your password" style={inputStyle} />
           </div>
-          {error && <div style={{ background: C.redL, border: `1px solid #fca5a5`, borderRadius: 9,
-            padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 14 }}>⚠️ {error}</div>}
+          {error && <div style={{
+            background: C.redL, border: `1px solid #fca5a5`, borderRadius: 9,
+            padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 14
+          }}>⚠️ {error}</div>}
           <Btn onClick={handle} disabled={loading} style={{ width: '100%', padding: '13px' }} size="lg" variant="primary">
             {loading ? 'Saving...' : 'Set Password & Continue →'}
           </Btn>
-          <button onClick={onLogout} style={{ width: '100%', marginTop: 12, background: 'none', border: 'none',
-            color: C.muted, fontSize: 12, cursor: 'pointer', padding: 9 }}>Cancel & Logout</button>
+          <button onClick={onLogout} style={{
+            width: '100%', marginTop: 12, background: 'none', border: 'none',
+            color: C.muted, fontSize: 12, cursor: 'pointer', padding: 9
+          }}>Cancel & Logout</button>
         </div>
       </div>
     </div>
@@ -764,7 +853,7 @@ function UserPortal({ user, onLogout }) {
     });
     const unsub2 = FireDB.subscribeBroadcast(msg => setBroadcast(msg));
     return () => { unsub1(); unsub2(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.username]);
 
   const submit = async () => {
@@ -810,12 +899,12 @@ function UserPortal({ user, onLogout }) {
 
   const getStatusMessage = (c) => {
     switch (c.status) {
-      case 'open':     return { msg: '🙏 Your complaint has been received. Our IT team will respond soon.', color: C.blue, bg: C.blueL };
-      case 'hold':     return { msg: `⏸️ On Hold: ${c.holdReason || 'Being reviewed by IT team.'}`, color: C.yellow, bg: C.yellowL };
+      case 'open': return { msg: '🙏 Your complaint has been received. Our IT team will respond soon.', color: C.blue, bg: C.blueL };
+      case 'hold': return { msg: `⏸️ On Hold: ${c.holdReason || 'Being reviewed by IT team.'}`, color: C.yellow, bg: C.yellowL };
       case 'resolved': return { msg: `✅ Resolved by ${c.actionBy || 'IT Team'}. Solution: ${c.solution || '—'}`, color: C.green, bg: C.greenL };
-      case 'refused':  return { msg: `❌ Refused. Reason: ${c.refuseReason || '—'}`, color: C.red, bg: C.redL };
-      case 'closed':   return { msg: `🔒 This complaint has been closed.`, color: C.muted, bg: C.off };
-      default:         return null;
+      case 'refused': return { msg: `❌ Refused. Reason: ${c.refuseReason || '—'}`, color: C.red, bg: C.redL };
+      case 'closed': return { msg: `🔒 This complaint has been closed.`, color: C.muted, bg: C.off };
+      default: return null;
     }
   };
 
@@ -823,16 +912,41 @@ function UserPortal({ user, onLogout }) {
     <div style={{ minHeight: '100vh', background: C.off }}>
       <style>{GS}</style>
       {/* Header */}
-      <div style={{ background: `linear-gradient(135deg,${C.navy},${C.navy3})`,
-        position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 2px 20px #0a162840' }}>
+      <div style={{
+        background: `linear-gradient(135deg,${C.navy},${C.navy3})`,
+        position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 2px 20px #0a162840'
+      }}>
         <BroadcastBanner message={broadcast} />
         <div style={{ maxWidth: 860, margin: '0 auto', padding: '0 16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 62 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 40, height: 40, borderRadius: 12,
-                background: 'linear-gradient(135deg,rgba(201,168,76,0.3),rgba(201,168,76,0.1))',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
-                border: '1px solid rgba(201,168,76,0.3)' }}>🏥</div>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 70,
+                  height: 70,
+                  borderRadius: 24,
+                  background:
+                    'linear-gradient(135deg,rgba(201,168,76,0.2),rgba(201,168,76,0.05))',
+                  backdropFilter: 'blur(10px)',
+                  marginBottom: 10,
+                  border: '1px solid rgba(201,168,76,0.3)',
+                  boxShadow: '0 0 30px rgba(201,168,76,0.15)',
+                  overflow: 'hidden'
+                }}
+              >
+                <img
+                  src={chrclogo}
+                  alt="Logo"
+                  style={{
+                    width: 38,
+                    height: 38,
+                    objectFit: 'contain'
+                  }}
+                />
+              </div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', fontFamily: "'Cormorant Garamond',serif" }}>Choithram Hospital</div>
                 <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', letterSpacing: .3 }}>IT Hardware Helpdesk</div>
@@ -850,14 +964,18 @@ function UserPortal({ user, onLogout }) {
           <div style={{ display: 'flex', gap: 0 }}>
             {[['form', '📝 New Complaint'], ['status', '📋 My Complaints']].map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)}
-                style={{ padding: '11px 20px', background: 'none', border: 'none',
+                style={{
+                  padding: '11px 20px', background: 'none', border: 'none',
                   borderBottom: `2.5px solid ${tab === k ? C.gold : 'transparent'}`,
                   color: tab === k ? C.gold2 : 'rgba(255,255,255,0.5)',
-                  fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all .2s', letterSpacing: .2 }}>
+                  fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all .2s', letterSpacing: .2
+                }}>
                 {l}
                 {k === 'status' && myComplaints.length > 0 && (
-                  <span style={{ background: C.gold, color: C.navy, borderRadius: 99,
-                    fontSize: 10, padding: '1px 7px', marginLeft: 6, fontWeight: 700 }}>{myComplaints.length}</span>
+                  <span style={{
+                    background: C.gold, color: C.navy, borderRadius: 99,
+                    fontSize: 10, padding: '1px 7px', marginLeft: 6, fontWeight: 700
+                  }}>{myComplaints.length}</span>
                 )}
               </button>
             ))}
@@ -870,19 +988,23 @@ function UserPortal({ user, onLogout }) {
         {tab === 'form' && (
           <div className="fadeUp">
             {lastTicket && (
-              <div style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)',
+              <div style={{
+                background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)',
                 border: `2px solid ${C.green}`, borderRadius: 16, padding: 22, marginBottom: 22,
-                display: 'flex', gap: 16, alignItems: 'flex-start', boxShadow: '0 4px 16px #06594620' }}>
+                display: 'flex', gap: 16, alignItems: 'flex-start', boxShadow: '0 4px 16px #06594620'
+              }}>
                 <div style={{ fontSize: 36, flexShrink: 0 }}>✅</div>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 17, color: C.green, fontFamily: "'Cormorant Garamond',serif" }}>
                     Complaint Submitted Successfully!
                   </div>
                   <div style={{ color: C.text2, fontSize: 13, marginTop: 6 }}>Your Ticket ID:</div>
-                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 20, fontWeight: 700,
+                  <div style={{
+                    fontFamily: "'JetBrains Mono',monospace", fontSize: 20, fontWeight: 700,
                     color: C.navy, marginTop: 4, letterSpacing: 1.5,
                     background: C.goldL, padding: '6px 14px', borderRadius: 8,
-                    display: 'inline-block', border: `1px solid ${C.gold}` }}>{lastTicket.id}</div>
+                    display: 'inline-block', border: `1px solid ${C.gold}`
+                  }}>{lastTicket.id}</div>
                   <div style={{ fontSize: 12, color: C.muted, marginTop: 8 }}>
                     📌 Save this Ticket ID to track your complaint status.
                   </div>
@@ -925,11 +1047,13 @@ function UserPortal({ user, onLogout }) {
                     const sel = form.type === t;
                     return (
                       <button key={t} onClick={() => { sf('type', t); sf('printerType', ''); }}
-                        style={{ padding: '14px 8px', borderRadius: 12, cursor: 'pointer',
+                        style={{
+                          padding: '14px 8px', borderRadius: 12, cursor: 'pointer',
                           border: `2px solid ${sel ? C.navy : C.border}`,
                           background: sel ? `linear-gradient(135deg,${C.navy},${C.navy3})` : '#f7f8fc',
                           color: sel ? '#fff' : C.muted, fontWeight: sel ? 700 : 500, fontSize: 12,
-                          textAlign: 'center', transition: 'all .18s', boxShadow: sel ? '0 4px 14px #0a162830' : 'none' }}>
+                          textAlign: 'center', transition: 'all .18s', boxShadow: sel ? '0 4px 14px #0a162830' : 'none'
+                        }}>
                         <div style={{ fontSize: 22, marginBottom: 5 }}>{icons[t]}</div>
                         <div style={{ letterSpacing: .2 }}>{t}</div>
                       </button>
@@ -956,8 +1080,10 @@ function UserPortal({ user, onLogout }) {
                   style={{ ...inputStyle, resize: 'vertical' }} />
               </div>
 
-              <div style={{ background: C.blueL, borderRadius: 10, padding: '10px 14px', marginBottom: 20,
-                border: `1px solid #bfdbfe`, fontSize: 13, color: C.blue }}>
+              <div style={{
+                background: C.blueL, borderRadius: 10, padding: '10px 14px', marginBottom: 20,
+                border: `1px solid #bfdbfe`, fontSize: 13, color: C.blue
+              }}>
                 🙏 <strong>Note:</strong> Our IT team will respond to your complaint as soon as possible. Sorry for any inconvenience caused.
               </div>
 
@@ -974,8 +1100,10 @@ function UserPortal({ user, onLogout }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {Object.entries(countByStatus).filter(([, v]) => v > 0).map(([k, v]) => (
-                  <div key={k} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
-                    padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div key={k} style={{
+                    background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
+                    padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 8
+                  }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_CFG[k]?.dot }} />
                     <span style={{ fontSize: 12, color: C.muted, fontWeight: 500 }}>{STATUS_CFG[k]?.label}:</span>
                     <span style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{v}</span>
@@ -1005,10 +1133,12 @@ function UserPortal({ user, onLogout }) {
                       onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 2px 12px #0a162810'; e.currentTarget.style.transform = 'none'; }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
                         <div>
-                          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12,
+                          <div style={{
+                            fontFamily: "'JetBrains Mono',monospace", fontSize: 12,
                             color: C.navy, fontWeight: 700, marginBottom: 4, letterSpacing: 1,
                             background: C.goldL, padding: '3px 10px', borderRadius: 6,
-                            border: `1px solid ${C.gold}`, display: 'inline-block' }}>{c.id}</div>
+                            border: `1px solid ${C.gold}`, display: 'inline-block'
+                          }}>{c.id}</div>
                           <div style={{ fontWeight: 700, fontSize: 16, color: C.text, marginTop: 6, fontFamily: "'Cormorant Garamond',serif" }}>
                             {c.type}{c.printerType ? ` — ${c.printerType}` : ''}
                           </div>
@@ -1018,15 +1148,19 @@ function UserPortal({ user, onLogout }) {
                         </div>
                         <Badge status={c.status} />
                       </div>
-                      <div style={{ background: C.off, borderRadius: 10, padding: '10px 14px',
-                        fontSize: 13, color: C.text2, lineHeight: 1.6, border: `1px solid ${C.border}`, marginBottom: 10 }}>
+                      <div style={{
+                        background: C.off, borderRadius: 10, padding: '10px 14px',
+                        fontSize: 13, color: C.text2, lineHeight: 1.6, border: `1px solid ${C.border}`, marginBottom: 10
+                      }}>
                         {c.desc.length > 120 ? c.desc.substring(0, 120) + '…' : c.desc}
                       </div>
                       {/* Live status message */}
                       {statusMsg && (
-                        <div style={{ padding: '10px 14px', background: statusMsg.bg, borderRadius: 10,
+                        <div style={{
+                          padding: '10px 14px', background: statusMsg.bg, borderRadius: 10,
                           fontSize: 13, color: statusMsg.color, fontWeight: 500,
-                          border: `1px solid ${statusMsg.color}22` }}>
+                          border: `1px solid ${statusMsg.color}22`
+                        }}>
                           {statusMsg.msg}
                           {c.actionBy && c.status !== 'open' && (
                             <span style={{ display: 'block', fontSize: 11, marginTop: 4, opacity: .8 }}>
@@ -1035,7 +1169,7 @@ function UserPortal({ user, onLogout }) {
                           )}
                         </div>
                       )}
-                      
+
                     </Card>
                   );
                 })}
@@ -1084,8 +1218,10 @@ function UserPortal({ user, onLogout }) {
                 🙏 Sorry for any inconvenience. IT team is working on your request.
               </div>
             </div>
-            <div style={{ fontSize: 11, color: C.muted, fontWeight: 700, marginBottom: 14, letterSpacing: .6,
-              textTransform: 'uppercase', borderBottom: `1px solid ${C.border}`, paddingBottom: 10 }}>
+            <div style={{
+              fontSize: 11, color: C.muted, fontWeight: 700, marginBottom: 14, letterSpacing: .6,
+              textTransform: 'uppercase', borderBottom: `1px solid ${C.border}`, paddingBottom: 10
+            }}>
               📜 Status History Timeline
             </div>
             <Timeline history={selected.history} />
@@ -1175,25 +1311,33 @@ function AdminPortal({ user, onLogout }) {
     if (type === 'resolve') {
       if (!actionForm.actionBy.trim() || !actionForm.solution.trim()) { alert('Fill all fields'); return; }
       newStatus = 'resolved';
-      histEntry = { status: 'resolved', at: now(), by: '', actionBy: actionForm.actionBy,
-        note: `Issue resolved. Solution: ${actionForm.solution}` };
+      histEntry = {
+        status: 'resolved', at: now(), by: '', actionBy: actionForm.actionBy,
+        note: `Issue resolved. Solution: ${actionForm.solution}`
+      };
       updateData = { actionBy: actionForm.actionBy, solution: actionForm.solution, actionAt: now() };
     } else if (type === 'hold') {
       if (!actionForm.reason.trim()) { alert('Please enter hold reason'); return; }
       newStatus = 'hold';
-      histEntry = { status: 'hold', at: now(), by: '', actionBy: user.displayName,
-        note: `Complaint put on hold. Reason: ${actionForm.reason}` };
+      histEntry = {
+        status: 'hold', at: now(), by: '', actionBy: user.displayName,
+        note: `Complaint put on hold. Reason: ${actionForm.reason}`
+      };
       updateData = { holdReason: actionForm.reason };
     } else if (type === 'refuse') {
       if (!actionForm.reason.trim()) { alert('Please enter refusal reason'); return; }
       newStatus = 'refused';
-      histEntry = { status: 'refused', at: now(), by: '', actionBy: user.displayName,
-        note: `Complaint refused. Reason: ${actionForm.reason}` };
+      histEntry = {
+        status: 'refused', at: now(), by: '', actionBy: user.displayName,
+        note: `Complaint refused. Reason: ${actionForm.reason}`
+      };
       updateData = { refuseReason: actionForm.reason };
     } else if (type === 'close') {
       newStatus = 'closed';
-      histEntry = { status: 'closed', at: now(), by: '', actionBy: user.displayName,
-        note: actionForm.reason ? `Complaint closed. Note: ${actionForm.reason}` : 'Complaint closed.' };
+      histEntry = {
+        status: 'closed', at: now(), by: '', actionBy: user.displayName,
+        note: actionForm.reason ? `Complaint closed. Note: ${actionForm.reason}` : 'Complaint closed.'
+      };
     }
 
     await FireDB.updateComplaint(c._docId, {
@@ -1337,16 +1481,41 @@ function AdminPortal({ user, onLogout }) {
     <div style={{ minHeight: '100vh', background: C.off }}>
       <style>{GS}</style>
       {/* Header */}
-      <div style={{ background: `linear-gradient(135deg,${C.navy} 0%,#0f2a50 60%,${C.navy3} 100%)`,
+      <div style={{
+        background: `linear-gradient(135deg,${C.navy} 0%,#0f2a50 60%,${C.navy3} 100%)`,
         position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 4px 24px #0a162850',
-        borderBottom: `1px solid rgba(201,168,76,0.15)` }}>
+        borderBottom: `1px solid rgba(201,168,76,0.15)`
+      }}>
         <div style={{ maxWidth: 1400, margin: '0 auto', padding: '0 20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 65 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div style={{ width: 42, height: 42, borderRadius: 13,
-                background: 'linear-gradient(135deg,rgba(201,168,76,0.25),rgba(201,168,76,0.08))',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
-                border: '1px solid rgba(201,168,76,0.35)' }}>⚙️</div>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 70,
+                  height: 70,
+                  borderRadius: 24,
+                  background:
+                    'linear-gradient(135deg,rgba(201,168,76,0.2),rgba(201,168,76,0.05))',
+                  backdropFilter: 'blur(10px)',
+                  marginBottom: 7,
+                  border: '1px solid rgba(201,168,76,0.3)',
+                  boxShadow: '0 0 30px rgba(201,168,76,0.15)',
+                  overflow: 'hidden'
+                }}
+              >
+                <img
+                  src={chrclogo}
+                  alt="Logo"
+                  style={{
+                    width: 38,
+                    height: 38,
+                    objectFit: 'contain'
+                  }}
+                />
+              </div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 15, color: '#fff', fontFamily: "'Cormorant Garamond',serif", letterSpacing: .3 }}>
                   Choithram Hospital — IT Admin Portal
@@ -1357,15 +1526,19 @@ function AdminPortal({ user, onLogout }) {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <div className="hide-sm" style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)',
-                background: 'rgba(255,255,255,0.08)', padding: '4px 12px', borderRadius: 99 }}>
+              <div className="hide-sm" style={{
+                fontSize: 13, color: 'rgba(255,255,255,0.7)',
+                background: 'rgba(255,255,255,0.08)', padding: '4px 12px', borderRadius: 99
+              }}>
                 {user.displayName}
               </div>
               {WHATSAPP_GROUP_LINK !== 'https://chat.whatsapp.com/YOUR_GROUP_INVITE_CODE' && (
                 <a href={WHATSAPP_GROUP_LINK} target="_blank" rel="noreferrer"
-                  style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.2)',
+                  style={{
+                    padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.2)',
                     color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 600, textDecoration: 'none',
-                    background: 'rgba(37,211,102,0.15)' }}>
+                    background: 'rgba(37,211,102,0.15)'
+                  }}>
                   💬 WA Group
                 </a>
               )}
@@ -1378,15 +1551,19 @@ function AdminPortal({ user, onLogout }) {
           <div style={{ display: 'flex', gap: 0, overflowX: 'auto' }}>
             {TABS.map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)}
-                style={{ padding: '11px 20px', background: 'none', border: 'none',
+                style={{
+                  padding: '11px 20px', background: 'none', border: 'none',
                   borderBottom: `2.5px solid ${tab === k ? C.gold : 'transparent'}`,
                   color: tab === k ? C.gold2 : 'rgba(255,255,255,0.5)',
                   fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all .2s',
-                  whiteSpace: 'nowrap', letterSpacing: .2 }}>
+                  whiteSpace: 'nowrap', letterSpacing: .2
+                }}>
                 {l}
                 {k === 'broadcast' && broadcast?.active && broadcast?.message && (
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b',
-                    display: 'inline-block', marginLeft: 6, animation: 'pulse 2s infinite' }} />
+                  <span style={{
+                    width: 7, height: 7, borderRadius: '50%', background: '#f59e0b',
+                    display: 'inline-block', marginLeft: 6, animation: 'pulse 2s infinite'
+                  }} />
                 )}
               </button>
             ))}
@@ -1454,10 +1631,12 @@ function AdminPortal({ user, onLogout }) {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5, flexWrap: 'wrap' }}>
-                          <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12,
+                          <span style={{
+                            fontFamily: "'JetBrains Mono',monospace", fontSize: 12,
                             color: C.navy, fontWeight: 700, letterSpacing: 1,
                             background: C.goldL, padding: '3px 10px', borderRadius: 6,
-                            border: `1px solid ${C.gold}` }}>{c.id}</span>
+                            border: `1px solid ${C.gold}`
+                          }}>{c.id}</span>
                           <Badge status={c.status} />
                           <span style={{ fontSize: 12, color: C.muted }}>
                             {c.type}{c.printerType ? ` · ${c.printerType}` : ''}
@@ -1476,27 +1655,35 @@ function AdminPortal({ user, onLogout }) {
                         <Btn onClick={() => setDeleteConfirm(c)} variant="danger" size="sm">🗑️</Btn>
                       </div>
                     </div>
-                    <div style={{ background: C.off, borderRadius: 10, padding: '9px 13px',
-                      fontSize: 13, color: C.text2, lineHeight: 1.5, border: `1px solid ${C.border}` }}>
+                    <div style={{
+                      background: C.off, borderRadius: 10, padding: '9px 13px',
+                      fontSize: 13, color: C.text2, lineHeight: 1.5, border: `1px solid ${C.border}`
+                    }}>
                       {c.desc?.length > 140 ? c.desc.substring(0, 140) + '…' : c.desc}
                     </div>
                     {c.status === 'resolved' && c.solution && (
                       <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <div style={{ padding: '7px 12px', background: C.greenL, borderRadius: 8,
-                          fontSize: 12, color: C.green, fontWeight: 500, border: `1px solid #a7f3d0`, flex: 1 }}>
+                        <div style={{
+                          padding: '7px 12px', background: C.greenL, borderRadius: 8,
+                          fontSize: 12, color: C.green, fontWeight: 500, border: `1px solid #a7f3d0`, flex: 1
+                        }}>
                           ✅ {c.solution}
                         </div>
                         {c.actionBy && (
-                          <div style={{ padding: '7px 12px', background: '#f0fdf4', borderRadius: 8,
-                            fontSize: 12, color: C.green, border: `1px solid #a7f3d0` }}>
+                          <div style={{
+                            padding: '7px 12px', background: '#f0fdf4', borderRadius: 8,
+                            fontSize: 12, color: C.green, border: `1px solid #a7f3d0`
+                          }}>
                             👤 {c.actionBy}
                           </div>
                         )}
                       </div>
                     )}
                     {c.status === 'hold' && c.holdReason && (
-                      <div style={{ marginTop: 10, padding: '8px 12px', background: C.yellowL, borderRadius: 8,
-                        fontSize: 12, color: C.yellow, border: `1px solid #fde68a` }}>
+                      <div style={{
+                        marginTop: 10, padding: '8px 12px', background: C.yellowL, borderRadius: 8,
+                        fontSize: 12, color: C.yellow, border: `1px solid #fde68a`
+                      }}>
                         ⏸️ Hold: {c.holdReason}
                       </div>
                     )}
@@ -1585,8 +1772,10 @@ function AdminPortal({ user, onLogout }) {
           <div className="fadeUp">
             <Card style={{ padding: 28, marginBottom: 18 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, paddingBottom: 18, borderBottom: `1px solid ${C.border}` }}>
-                <div style={{ width: 48, height: 48, borderRadius: 14, background: 'linear-gradient(135deg,#5b21b6,#7c3aed)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>📢</div>
+                <div style={{
+                  width: 48, height: 48, borderRadius: 14, background: 'linear-gradient(135deg,#5b21b6,#7c3aed)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24
+                }}>📢</div>
                 <div>
                   <h2 style={{ fontWeight: 700, fontSize: 20, color: C.text, fontFamily: "'Cormorant Garamond',serif" }}>Broadcast Message</h2>
                   <p style={{ color: C.muted, fontSize: 13 }}>Send announcement to all users</p>
@@ -1617,8 +1806,10 @@ function AdminPortal({ user, onLogout }) {
             {/* WhatsApp Group Section */}
             <Card style={{ padding: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
-                <div style={{ width: 48, height: 48, borderRadius: 14, background: 'linear-gradient(135deg,#25D366,#128C7E)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>💬</div>
+                <div style={{
+                  width: 48, height: 48, borderRadius: 14, background: 'linear-gradient(135deg,#25D366,#128C7E)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24
+                }}>💬</div>
                 <div>
                   <h2 style={{ fontWeight: 700, fontSize: 18, color: C.text, fontFamily: "'Cormorant Garamond',serif" }}>WhatsApp Group Alert</h2>
                   <p style={{ color: C.muted, fontSize: 13 }}>New complaints auto-notify via CallMeBot API</p>
@@ -1641,9 +1832,11 @@ function AdminPortal({ user, onLogout }) {
                   </div>
                   {WHATSAPP_GROUP_LINK !== 'https://chat.whatsapp.com/YOUR_GROUP_INVITE_CODE' && (
                     <a href={WHATSAPP_GROUP_LINK} target="_blank" rel="noreferrer"
-                      style={{ display: 'inline-block', marginTop: 12, padding: '8px 16px',
+                      style={{
+                        display: 'inline-block', marginTop: 12, padding: '8px 16px',
                         background: 'linear-gradient(135deg,#25D366,#128C7E)', color: '#fff',
-                        borderRadius: 9, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+                        borderRadius: 9, textDecoration: 'none', fontWeight: 700, fontSize: 13
+                      }}>
                       💬 Open WhatsApp Group
                     </a>
                   )}
@@ -1674,10 +1867,12 @@ function AdminPortal({ user, onLogout }) {
                 <Card key={u.username} style={{ padding: 16 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                     <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                      <div style={{ width: 40, height: 40, borderRadius: 12,
+                      <div style={{
+                        width: 40, height: 40, borderRadius: 12,
                         background: u.role === 'admin' ? `linear-gradient(135deg,${C.gold},#b8860b)` : `linear-gradient(135deg,${C.navy},#1a3a6b)`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 16, color: '#fff', fontWeight: 700, flexShrink: 0 }}>
+                        fontSize: 16, color: '#fff', fontWeight: 700, flexShrink: 0
+                      }}>
                         {(u.displayName || u.username || '?').charAt(0).toUpperCase()}
                       </div>
                       <div>
@@ -1685,9 +1880,11 @@ function AdminPortal({ user, onLogout }) {
                         <div style={{ fontSize: 11, color: C.muted, marginTop: 2, fontFamily: "'JetBrains Mono',monospace" }}>{u.username}</div>
                       </div>
                     </div>
-                    <span style={{ fontSize: 10, padding: '3px 9px', borderRadius: 99, fontWeight: 700,
+                    <span style={{
+                      fontSize: 10, padding: '3px 9px', borderRadius: 99, fontWeight: 700,
                       background: u.role === 'admin' ? C.goldL : C.blueL,
-                      color: u.role === 'admin' ? '#7c2d12' : C.blue, letterSpacing: .3, textTransform: 'uppercase' }}>
+                      color: u.role === 'admin' ? '#7c2d12' : C.blue, letterSpacing: .3, textTransform: 'uppercase'
+                    }}>
                       {u.role}
                     </span>
                   </div>
@@ -1870,8 +2067,10 @@ function AdminPortal({ user, onLogout }) {
             </select>
           </div>
           {addUserError && (
-            <div style={{ background: C.redL, border: `1px solid #fca5a5`, borderRadius: 9,
-              padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 14 }}>⚠️ {addUserError}</div>
+            <div style={{
+              background: C.redL, border: `1px solid #fca5a5`, borderRadius: 9,
+              padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 14
+            }}>⚠️ {addUserError}</div>
           )}
           <Btn onClick={handleAddUser} variant="primary" size="md" style={{ width: '100%' }}>➕ Add User</Btn>
         </div>
