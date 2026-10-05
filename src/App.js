@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useRef, Component } from 'react';
-import * as XLSX from 'xlsx';
+import { useState, useEffect, useMemo, useRef, Component, createContext, useContext } from 'react';
+import * as XLSX from 'xlsx-js-style';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area
@@ -7,7 +7,7 @@ import {
 import { db } from './firebase';
 import {
   collection, addDoc, getDocs, doc, updateDoc, deleteDoc,
-  onSnapshot, query, orderBy, serverTimestamp, setDoc, getDoc
+  onSnapshot, query, orderBy, serverTimestamp, setDoc, getDoc, limit
 } from 'firebase/firestore';
 import chrclogo from '../src/chrclogo.png';
 import hospitalImg1 from './hospital.webp';
@@ -87,22 +87,15 @@ const buildInitialUsers = () => {
 const INITIAL_USERS = buildInitialUsers();
 
 const COMPLAINT_TYPES = [
-  'IT Hardware', 'Network', 'Software', 'Printer', 'PC/Printer Shifting',
+  'IT Hardware', 'Network', 'Other Software', 'Suvarna', 'Printer', 'PC/Printer Shifting',
   'Electrical', 'AC', 'Air Cooler', 'Air Curtain', 'Water Cooler', 'RO',
   'Fridge/Freezer', 'Mobile/Charger', 'Gas Plant/Cylinder',
   'Furniture Shifting', 'Furniture Repairing', 'Carpenter', 'Painter',
   'Biomedical Equipment', 'Plumber', 'Welding'
 ];
 
-// Category icons kept — they help employees find the right category quickly.
-const TYPE_ICONS = {
-  'IT Hardware': '🖥️', 'Network': '🌐', 'Software': '💿', 'Printer': '🖨️',
-  'PC/Printer Shifting': '🔄', 'Electrical': '💡', 'AC': '❄️', 'Air Cooler': '🌬️',
-  'Air Curtain': '🚪', 'Water Cooler': '🥤', 'RO': '💧', 'Fridge/Freezer': '🧊',
-  'Mobile/Charger': '📱', 'Gas Plant/Cylinder': '🔥', 'Furniture Shifting': '🛋️',
-  'Furniture Repairing': '🔨', 'Carpenter': '🪚', 'Painter': '🎨',
-  'Biomedical Equipment': '🩺', 'Plumber': '🚰', 'Welding': '⚡'
-};
+// Legacy tickets/users saved the category as "Software"; it is now "Other Software".
+const typeKey = (t) => (t === 'Software' ? 'Other Software' : t);
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -117,11 +110,11 @@ const RATING_OPTIONS = [
 
 // Statuses: open → hold (Processing) → resolve (auto-closes) / refuse
 const STATUS_CFG = {
-  open: { label: 'Open', color: '#1e40af', bg: '#dbeafe', dot: '#3b82f6' },
-  hold: { label: 'Processing', color: '#92400e', bg: '#fef3c7', dot: '#f59e0b' },
-  resolved: { label: 'Resolved', color: '#065f46', bg: '#d1fae5', dot: '#10b981' },
-  refused: { label: 'Refused', color: '#991b1b', bg: '#fee2e2', dot: '#ef4444' },
-  closed: { label: 'Closed', color: '#374151', bg: '#f3f4f6', dot: '#9ca3af' },
+  open: { label: 'Open', color: '#1d4ed8', bg: 'rgba(59,130,246,0.10)', dot: '#3b82f6' },
+  hold: { label: 'Processing', color: '#9a5b0b', bg: 'rgba(217,119,6,0.10)', dot: '#d97706' },
+  resolved: { label: 'Resolved', color: '#0f6b46', bg: 'rgba(16,185,129,0.10)', dot: '#10b981' },
+  refused: { label: 'Refused', color: '#b42318', bg: 'rgba(239,68,68,0.10)', dot: '#ef4444' },
+  closed: { label: 'Closed', color: '#475467', bg: 'rgba(100,116,139,0.10)', dot: '#98a2b3' },
 };
 
 // Employee picks this when raising a ticket — lets admins triage at a glance.
@@ -133,45 +126,53 @@ const PRIORITY_CFG = {
 };
 const DEFAULT_PRIORITY = 'medium';
 
-function PriorityBadge({ priority, unresolved = false }) {
+function PriorityBadge({ priority }) {
   const p = PRIORITY_CFG[priority] || PRIORITY_CFG[DEFAULT_PRIORITY];
-  const blink = priority === 'high' && unresolved;
   return (
-    <span className={blink ? 'blinkHigh' : ''} style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 99,
-      fontSize: 11, fontWeight: 700, color: p.color, background: p.bg, letterSpacing: .3
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 99,
+      fontSize: 11, fontWeight: 600, color: p.color, background: p.bg, letterSpacing: .2
     }}>
-      {blink ? '🔴' : '●'} {p.label.toUpperCase()}{blink ? ' PRIORITY' : ''}
+      {p.label}
     </span>
   );
 }
-
 // ── ROLE / PERMISSIONS HELPERS ────────────────────────────────
 // Derives a normalized permission object from a user record, whether it was
 // saved with the new fields (isEmployee/isAdmin/adminScope/adminCategories)
 // or is an older record that only has the legacy `role` string.
+const headUsernamesOf = (u) => {
+  const list = Array.isArray(u && u.headUsernames) ? u.headUsernames : (u && u.headUsername ? [u.headUsername] : []);
+  return list.filter(Boolean);
+};
+
 const deriveUserPerms = (u) => {
-  if (!u) return { isEmployee: false, isAdmin: false, adminScope: 'none', adminCategories: [], isFullAdmin: false };
+  if (!u) return { isEmployee: false, isAdmin: false, adminScope: 'none', adminCategories: [], isFullAdmin: false, isTechnician: false, headUsernames: [], canAssign: false };
   if (typeof u.isEmployee === 'boolean' || typeof u.isAdmin === 'boolean') {
     const isAdmin = !!u.isAdmin;
-    const adminScope = isAdmin ? (u.adminScope === 'categories' ? 'categories' : 'all') : 'none';
+    const adminScope = isAdmin ? (u.adminScope === 'categories' ? 'categories' : u.adminScope === 'assigned' ? 'assigned' : 'all') : 'none';
     return {
       isEmployee: !!u.isEmployee,
       isAdmin,
       adminScope,
-      adminCategories: Array.isArray(u.adminCategories) ? u.adminCategories : [],
-      isFullAdmin: isAdmin && adminScope === 'all'
+      adminCategories: Array.isArray(u.adminCategories) ? u.adminCategories.map(typeKey) : [],
+      isFullAdmin: isAdmin && adminScope === 'all',
+      // Technician = sees only tickets allocated to them. Heads (category admins) and
+      // full admins can allocate tickets to technicians.
+      isTechnician: isAdmin && adminScope === 'assigned',
+      headUsernames: headUsernamesOf(u),
+      canAssign: isAdmin && adminScope !== 'assigned'
     };
   }
   // Legacy migration — old records only ever had `role`.
-  if (u.role === 'admin') return { isEmployee: false, isAdmin: true, adminScope: 'all', adminCategories: [], isFullAdmin: true };
-  if (u.role === 'both') return { isEmployee: true, isAdmin: true, adminScope: 'all', adminCategories: [], isFullAdmin: true };
-  return { isEmployee: true, isAdmin: false, adminScope: 'none', adminCategories: [], isFullAdmin: false };
+  if (u.role === 'admin') return { isEmployee: false, isAdmin: true, adminScope: 'all', adminCategories: [], isFullAdmin: true, isTechnician: false, headUsernames: [], canAssign: true };
+  if (u.role === 'both') return { isEmployee: true, isAdmin: true, adminScope: 'all', adminCategories: [], isFullAdmin: true, isTechnician: false, headUsernames: [], canAssign: true };
+  return { isEmployee: true, isAdmin: false, adminScope: 'none', adminCategories: [], isFullAdmin: false, isTechnician: false, headUsernames: [], canAssign: false };
 };
 
 const roleSummaryLabel = (perms) => {
   if (!perms.isAdmin) return perms.isEmployee ? 'Employee' : 'No Access';
-  const adminPart = perms.adminScope === 'all' ? 'Full Admin' : 'Category Admin';
+  const adminPart = perms.adminScope === 'all' ? 'Full Admin' : perms.adminScope === 'assigned' ? 'Technician' : 'Category Admin';
   return perms.isEmployee ? `${adminPart} + Employee` : adminPart;
 };
 
@@ -275,6 +276,43 @@ const FireDB = {
   }
 };
 
+
+// ── ACTIVITY LOGS ─────────────────────────────────────────────
+// Every important action is written to the `logs` collection (append-only
+// from the UI — there is no edit/delete for logs anywhere in this app).
+const LOG_TYPES = {
+  ticket: { label: 'Ticket', color: '#1e40af', bg: '#dbeafe' },
+  allocation: { label: 'Allocation', color: '#5b21b6', bg: '#f3e8ff' },
+  chat: { label: 'Chat', color: '#065f46', bg: '#d1fae5' },
+  auth: { label: 'Login / Access', color: '#92400e', bg: '#fef3c7' },
+  user: { label: 'User Management', color: '#991b1b', bg: '#fee2e2' },
+};
+
+const Logger = {
+  // Fire-and-forget: a failed log write must never block or break the UI.
+  log(type, action, actor, extra = {}) {
+    try {
+      addDoc(collection(db, 'logs'), {
+        type,
+        action,
+        actor: (actor && actor.username) || 'unknown',
+        actorName: (actor && actor.displayName) || '',
+        ticketId: extra.ticketId || '',
+        target: extra.target || '',
+        details: String(extra.details || '').slice(0, 300),
+        at: new Date().toISOString(),
+        ts: serverTimestamp()
+      }).catch(e => console.warn('log write failed:', e));
+    } catch (e) { console.warn('log write failed:', e); }
+  },
+  subscribe(callback, max = 1000) {
+    const q = query(collection(db, 'logs'), orderBy('at', 'desc'), limit(max));
+    return onSnapshot(q,
+      snap => callback(snap.docs.map(d => ({ ...d.data(), _id: d.id }))),
+      err => { console.error('subscribe logs:', err); callback([]); });
+  }
+};
+
 // ── HELPERS ───────────────────────────────────────────────────
 const genTicket = (n) => `IDAR-${String(n).padStart(4, '0')}`;
 const now = () => new Date().toISOString();
@@ -315,116 +353,260 @@ const genSessionId = () => {
   return 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2);
 };
 
-// ── PRINT: full ticket history with resolution time + rating slip ─────
+// ── PRINT: full ticket record (works without pop-ups) ───────────────
+const escHtml = (v) => String(v == null ? '' : v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// Prints through a hidden iframe so browsers can't block it as a pop-up.
+const printHtmlDocument = (html) => {
+  try {
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+    document.body.appendChild(frame);
+    const doc = frame.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    setTimeout(() => {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+      catch (e) { console.warn('print failed:', e); }
+      setTimeout(() => { try { document.body.removeChild(frame); } catch (e) { /* already removed */ } }, 60000);
+    }, 350);
+  } catch (e) {
+    console.warn('print frame failed, falling back to a new window:', e);
+    const win = window.open('', '_blank', 'width=900,height=1000');
+    if (!win) { toast.error('Printing is blocked by the browser. Please allow pop-ups for this site.'); return; }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 400);
+  }
+};
+
 const printComplaint = (c) => {
-  const win = window.open('', '_blank', 'width=850,height=1000');
-  if (!win) { alert('Please allow pop-ups to print this ticket.'); return; }
-  const raisedAt = fmtDT(c.at);
-  const resolvedAt = c.actionAt ? fmtDT(c.actionAt) : '—';
-  const duration = c.actionAt ? getDuration(c.at, c.actionAt) : '—';
+  const done = c.status === 'resolved' || c.status === 'closed';
+  const raisedAt = c.at ? fmtDT(c.at) : 'N/A';
+  const resolvedAt = done && c.actionAt ? fmtDT(c.actionAt) : 'N/A';
+  const duration = done && c.actionAt ? getDuration(c.at, c.actionAt) : 'N/A';
+  const pr = (PRIORITY_CFG[c.priority] || PRIORITY_CFG[DEFAULT_PRIORITY]).label;
+  const st = STATUS_CFG[c.status]?.label || c.status || 'N/A';
+  const P = C.navy;
+  const T = (v) => escHtml(na(v));
   const ratingRows = RATING_OPTIONS.map(r => `
-    <td style="text-align:center;padding:10px 6px;border:1px solid #ccd6e2;">
-      <div style="font-size:16px;">${c.rating === r.key ? '[X]' : '[ ]'}</div>
-      <div style="font-size:11px;margin-top:4px;color:#33465f;">${r.label}</div>
+    <td style="text-align:center;padding:9px 6px;border:1px solid #d5dbe1;">
+      <div style="font-size:15px;">${c.rating === r.key ? '[X]' : '[ ]'}</div>
+      <div style="font-size:11px;margin-top:3px;color:#374151;">${r.label}</div>
     </td>`).join('');
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${c.id} - Ticket Print</title>
+  const histRows = (c.history || []).map(h => `
+    <tr>
+      <td>${escHtml(fmtDT(h.at))}</td>
+      <td>${escHtml(STATUS_CFG[h.status]?.label || h.status || 'N/A')}</td>
+      <td>${T(h.actionBy || h.by)}</td>
+      <td>${T(h.note)}</td>
+    </tr>`).join('');
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(c.id)} - Ticket</title>
   <style>
-    * { box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
-    body { margin: 30px; color: #152a44; }
-    .head { display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #0b4f43; padding-bottom:14px; margin-bottom:20px; }
-    .head h1 { font-size:20px; color:#0b4f43; margin:0; }
-    .head p { font-size:12px; color:#68778e; margin:2px 0 0; }
-    .ticket-id { font-size:16px; font-weight:700; color:#fff; background:#0b4f43; padding:6px 16px; border-radius:6px; letter-spacing:1px; }
-    table.info { width:100%; border-collapse:collapse; margin-bottom:18px; }
-    table.info td { border:1px solid #ccd6e2; padding:8px 12px; font-size:13px; }
-    table.info td.label { background:#f4f7fb; font-weight:700; width:180px; color:#33465f; }
-    .desc-box { border:1px solid #ccd6e2; border-radius:6px; padding:12px; font-size:13px; margin-bottom:18px; line-height:1.6; }
-    .section-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#68778e; margin:18px 0 8px; }
-    table.rating { width:100%; border-collapse:collapse; margin-bottom:22px; }
-    .sign-row { display:flex; justify-content:space-between; margin-top:50px; }
-    .sign-box { width:45%; border-top:1px solid #333; padding-top:6px; font-size:12px; text-align:center; color:#33465f; }
-    .footer-note { font-size:11px; color:#68778e; margin-top:30px; text-align:center; }
-    @media print { .no-print { display:none; } }
-  </style></head>
-  <body>
+    @page { margin: 14mm; }
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#1f2937;margin:0;padding:6px;font-size:12.5px;}
+    .head{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid ${P};padding-bottom:12px;margin-bottom:16px;}
+    .head h1{font-size:19px;color:${P};margin:0;}
+    .head p{font-size:11.5px;color:#6b7280;margin:3px 0 0;}
+    .tid{font-size:15px;font-weight:700;color:#fff;background:${P};padding:6px 14px;border-radius:6px;letter-spacing:1px;}
+    table.info{width:100%;border-collapse:collapse;margin-bottom:14px;}
+    table.info td{border:1px solid #d5dbe1;padding:7px 10px;font-size:12.5px;}
+    table.info td.l{background:#f3f6f5;font-weight:600;width:19%;color:#374151;}
+    .sec{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#6b7280;margin:16px 0 6px;}
+    .box{border:1px solid #d5dbe1;border-radius:6px;padding:10px 12px;line-height:1.55;font-size:12.5px;}
+    table.hist{width:100%;border-collapse:collapse;}
+    table.hist th{background:#f3f6f5;text-align:left;font-size:11px;padding:6px 8px;border:1px solid #d5dbe1;color:#374151;}
+    table.hist td{padding:6px 8px;border:1px solid #d5dbe1;font-size:12px;vertical-align:top;}
+    table.rating{width:100%;border-collapse:collapse;}
+    .sign{display:flex;justify-content:space-between;margin-top:46px;}
+    .sign div{width:44%;border-top:1px solid #374151;padding-top:6px;text-align:center;font-size:11.5px;color:#374151;}
+    .foot{font-size:10.5px;color:#6b7280;margin-top:26px;text-align:center;}
+  </style></head><body>
     <div class="head">
-      <div><h1>Choithram Hospital &amp; Research Centre</h1><p>IDAR — Complaint &amp; Request Management System</p></div>
-      <div class="ticket-id">${c.id}</div>
+      <div><h1>Choithram Hospital &amp; Research Centre</h1><p>IDAR - Complaint &amp; Request Management System</p></div>
+      <div class="tid">${escHtml(c.id)}</div>
     </div>
     <table class="info">
-      <tr><td class="label">Category</td><td>${c.type}</td><td class="label">Priority</td><td>${(PRIORITY_CFG[c.priority] || PRIORITY_CFG[DEFAULT_PRIORITY]).label}</td></tr>
-      <tr><td class="label">Status</td><td colspan="3">${STATUS_CFG[c.status]?.label || c.status}</td></tr>
-      <tr><td class="label">Raised By</td><td>${c.userName || ''}</td><td class="label">Employee ID</td><td>${c.empId || '—'}</td></tr>
-      <tr><td class="label">Department / Location</td><td colspan="3">${c.dept || ''}</td></tr>
-      <tr><td class="label">Raised On (Date &amp; Time)</td><td>${raisedAt}</td><td class="label">Resolved On (Date &amp; Time)</td><td>${resolvedAt}</td></tr>
-      <tr><td class="label">Resolution Time Taken</td><td>${duration}</td><td class="label">Resolved By</td><td>${c.actionBy || '—'}</td></tr>
+      <tr><td class="l">Category</td><td>${T(typeKey(c.type))}</td><td class="l">Priority</td><td>${escHtml(pr)}</td></tr>
+      <tr><td class="l">Status</td><td>${escHtml(st)}</td><td class="l">Assigned Technician</td><td>${T(c.assignedToName)}</td></tr>
+      <tr><td class="l">Raised By</td><td>${T(c.userName)}</td><td class="l">Employee ID</td><td>${T(c.empId)}</td></tr>
+      <tr><td class="l">Department / Location</td><td colspan="3">${T(c.dept)}</td></tr>
+      <tr><td class="l">Raised On</td><td>${escHtml(raisedAt)}</td><td class="l">Resolved On</td><td>${escHtml(resolvedAt)}</td></tr>
+      <tr><td class="l">Time Taken</td><td>${escHtml(duration)}</td><td class="l">Resolved By</td><td>${T(done ? c.actionBy : '')}</td></tr>
     </table>
-    <div class="section-title">Issue / Request Description</div>
-    <div class="desc-box">${(c.desc || '').replace(/</g, '&lt;')}</div>
-    ${c.solution ? `<div class="section-title">Solution / Action Taken</div><div class="desc-box">${c.solution.replace(/</g, '&lt;')}</div>` : ''}
-    ${c.ratingRemark ? `<div class="section-title">Employee Remark (submitted online)</div><div class="desc-box">${c.ratingRemark.replace(/</g, '&lt;')}</div>` : ''}
-    <div class="section-title">Employee Satisfaction Rating (please tick one)</div>
-    <table class="rating"><tr>${ratingRows}</tr></table>
-    <div class="sign-row">
-      <div class="sign-box">Employee Signature</div>
-      <div class="sign-box">IT / Maintenance Team Signature</div>
-    </div>
-    <div class="footer-note">Printed on ${fmtDT(now())} · Choithram Hospital &amp; Research Centre — IDAR Ticket System</div>
+    <div class="sec">Issue Description</div>
+    <div class="box">${T(c.desc)}</div>
+    <div class="sec">Action Taken / Solution</div>
+    <div class="box">${T(c.solution)}</div>
+    <div class="sec">Status History</div>
+    <table class="hist"><tr><th style="width:22%">Date &amp; Time</th><th style="width:14%">Status</th><th style="width:18%">By</th><th>Details</th></tr>${histRows || '<tr><td colspan="4">N/A</td></tr>'}</table>
+    ${done ? `
+      <div class="sec">Employee Remark</div>
+      <div class="box">${T(c.ratingRemark)}</div>
+      <div class="sec">Employee Satisfaction Rating</div>
+      <table class="rating"><tr>${ratingRows}</tr></table>` : ''}
+    <div class="sign"><div>Employee Signature</div><div>IT / Maintenance Team Signature</div></div>
+    <div class="foot">Printed on ${escHtml(fmtDT(now()))} | Choithram Hospital &amp; Research Centre - IDAR Ticket System</div>
   </body></html>`;
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  setTimeout(() => win.print(), 400);
+  printHtmlDocument(html);
 };
 
-// ── THEME ── Clean professional white theme ────────────────────────────
+// ── THEME ─────────────────────────────────────────────────────
+// C holds the live colour tokens. Choosing a theme overwrites the tokens that
+// define the look (navbar, buttons, accents, page tint) and re-renders the app.
 const C = {
-  navy: '#0b4f43', navy2: '#083f36', navy3: '#0e6b57',
-  gold: '#12a37f', gold2: '#1ec39a', goldL: '#e3f6ef',
-  white: '#ffffff', off: '#f4f8f6', card: '#ffffff',
-  border: '#e1e9e6', border2: '#c6d5cf',
-  text: '#132621', text2: '#33453f', muted: '#68786f',
-  green: '#0f7a3d', greenL: '#e4f7ea',
-  yellow: '#b45309', yellowL: '#fef3c7',
-  red: '#c0261e', redL: '#fdeaea',
-  blue: '#0b4f43', blueL: '#e3f6ef',
-  accent: '#0b4f43',
+  navy: '#0f4c43', navy2: '#0c3d36', navy3: '#14705f',
+  gold: '#14876e', gold2: '#1ba386', goldL: '#e9f4f0',
+  white: '#ffffff', off: '#f5f8f7', card: '#ffffff',
+  border: '#e1e9e6', border2: '#cdd8d4',
+  text: '#17231f', text2: '#37463f', muted: '#6b7a73',
+  green: '#177a45', greenL: '#eef7f1',
+  yellow: '#a8560a', yellowL: '#fbf5e6',
+  red: '#b42318', redL: '#fcf0ef',
+  blue: '#0f4c43', blueL: '#e9f4f0',
+  accent: '#0f4c43',
 };
 
-const GS = `
+const THEMES = {
+  emerald: { label: 'Emerald', navy: '#0f4c43', navy2: '#0c3d36', navy3: '#14705f', gold: '#14876e', gold2: '#1ba386', goldL: '#e9f4f0', off: '#f5f8f7', border: '#e1e9e6', border2: '#cdd8d4', blue: '#0f4c43', blueL: '#e9f4f0', accent: '#0f4c43' },
+  ocean: { label: 'Ocean Blue', navy: '#1d4f91', navy2: '#163d72', navy3: '#2b6cb8', gold: '#2f7fd1', gold2: '#4a97e6', goldL: '#e8f1fb', off: '#f4f7fb', border: '#dfe7f1', border2: '#c8d5e6', blue: '#1d4f91', blueL: '#e8f1fb', accent: '#1d4f91' },
+  indigo: { label: 'Royal Indigo', navy: '#4338ca', navy2: '#312e81', navy3: '#4f46e5', gold: '#6366f1', gold2: '#818cf8', goldL: '#eef0ff', off: '#f6f6fc', border: '#e4e5f3', border2: '#d0d1e9', blue: '#4338ca', blueL: '#eef0ff', accent: '#4338ca' },
+  teal: { label: 'Teal', navy: '#0e7490', navy2: '#0b5e75', navy3: '#0f8aab', gold: '#0891b2', gold2: '#22b3d3', goldL: '#e6f6fa', off: '#f3f8fa', border: '#dbe8ed', border2: '#c3d6de', blue: '#0e7490', blueL: '#e6f6fa', accent: '#0e7490' },
+  slate: { label: 'Graphite', navy: '#334155', navy2: '#1e293b', navy3: '#475569', gold: '#0f766e', gold2: '#14998f', goldL: '#eef2f6', off: '#f5f7f9', border: '#e2e8f0', border2: '#cbd5e1', blue: '#334155', blueL: '#eef2f6', accent: '#334155' },
+  burgundy: { label: 'Burgundy', navy: '#9f1239', navy2: '#7f0f2e', navy3: '#bf1e4d', gold: '#d6336c', gold2: '#e5567f', goldL: '#fdf0f3', off: '#faf6f7', border: '#efe2e5', border2: '#e0cdd2', blue: '#9f1239', blueL: '#fdf0f3', accent: '#9f1239' },
+};
+
+const THEME_STORE_KEY = 'idar_theme';
+const applyTheme = (key) => {
+  const k = THEMES[key] ? key : 'emerald';
+  const tokens = { ...THEMES[k] };
+  delete tokens.label;
+  Object.assign(C, tokens);
+  return k;
+};
+const readSavedTheme = () => {
+  try { return window.localStorage.getItem(THEME_STORE_KEY) || 'emerald'; } catch (e) { return 'emerald'; }
+};
+applyTheme(readSavedTheme());
+const ThemeContext = createContext({ key: 'emerald', setKey: () => {} });
+
+// A ticket that sees no activity for this many hours (by priority) is treated as
+// overdue — the assistant then reminds the technician / department head.
+const SLA_HOURS = { high: 1, medium: 4, low: 8 };
+
+const na = (v) => (v === undefined || v === null || String(v).trim() === '' ? 'N/A' : v);
+
+const fmtSpan = (ms) => {
+  const mins = Math.max(0, Math.floor(ms / 60000));
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  const parts = [];
+  if (d) parts.push(`${d}d`);
+  if (h) parts.push(`${h}h`);
+  if (m || parts.length === 0) parts.push(`${m}m`);
+  return parts.join(' ');
+};
+
+const lastActivityAt = (c) => {
+  const h = c.history || [];
+  const last = h.length ? h[h.length - 1].at : null;
+  return last || c.assignedAt || c.at;
+};
+
+// Returns null unless the ticket is active and has been idle past its SLA limit.
+const slaState = (c, nowMs) => {
+  if (!c || !(c.status === 'open' || c.status === 'hold')) return null;
+  const limit = (SLA_HOURS[c.priority] || SLA_HOURS.medium) * 3600000;
+  const since = new Date(lastActivityAt(c)).getTime();
+  if (!since || isNaN(since)) return null;
+  const idle = nowMs - since;
+  if (!(idle >= limit)) return null;
+  return { idle, limit, n: Math.floor(idle / limit) };
+};
+
+const useNowTick = (ms = 60000) => {
+  const [t, setT] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setT(Date.now()), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+  return t;
+};
+
+const buildGS = () => `
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-html{-webkit-text-size-adjust:100%;}
-html,body{width:100%;max-width:100vw;overflow-x:hidden;}
-body{background:${C.off};font-family:'DM Sans',sans-serif;color:${C.text};font-size:15px;}
+html{-webkit-text-size-adjust:100%;overflow-x:hidden;}
+html,body{width:100%;}
+:root{--nav-h:112px;}
+body{background:radial-gradient(1100px 520px at 105% -8%,${C.gold}1a,transparent 60%),radial-gradient(900px 480px at -10% 108%,${C.navy}12,transparent 60%),${C.off};background-attachment:fixed;font-family:'DM Sans',sans-serif;color:${C.text};font-size:15px;}
 input,select,textarea,button{font-family:'DM Sans',sans-serif;}
 img{max-width:100%;height:auto;}
 button,select,input,a{touch-action:manipulation;}
-::-webkit-scrollbar{width:5px;height:5px;}
-::-webkit-scrollbar-track{background:#f1f5f9;}
-::-webkit-scrollbar-thumb{background:#c8d0e0;border-radius:99px;}
-@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+input:focus,select:focus,textarea:focus{border-color:${C.gold}!important;box-shadow:0 0 0 3px ${C.gold}26!important;outline:none;}
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:#c3ccc8;border-radius:99px;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
-@keyframes blinkHigh{0%,100%{box-shadow:0 0 0 0 rgba(192,38,30,.55);}50%{box-shadow:0 0 0 5px rgba(192,38,30,0);}}
-.blinkHigh{animation:blinkHigh 1.3s ease-in-out infinite;}
-.fadeUp{animation:fadeUp .4s cubic-bezier(.22,.68,0,1.2) both;}
-.fadeIn{animation:fadeIn .4s ease both;}
-.slideDown{animation:slideDown .22s ease both;}
+@keyframes slideDown{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@keyframes typingDot{0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-2px)}}
+.fadeUp{animation:fadeUp .25s ease-out both;}
+@keyframes toastIn{from{opacity:0;transform:translateY(-10px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes drawCheck{from{stroke-dashoffset:26}to{stroke-dashoffset:0}}
+.toast-in{animation:toastIn .28s cubic-bezier(.2,.8,.2,1) both;}
+.toast-check{stroke-dasharray:26;stroke-dashoffset:26;animation:drawCheck .45s .12s ease-out forwards;}
+.idar-btn{position:relative;overflow:hidden;transition:transform .18s ease,filter .18s ease,box-shadow .18s ease,background .18s ease;}
+.idar-btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06) saturate(1.05);box-shadow:0 8px 20px ${C.navy}33!important;}
+.idar-btn:active:not(:disabled){transform:translateY(0);filter:brightness(.98);}
+.idar-btn-solid::after{content:'';position:absolute;top:0;bottom:0;left:-60%;width:45%;background:linear-gradient(110deg,transparent,rgba(255,255,255,.38),transparent);transform:skewX(-20deg);transition:left .65s ease;pointer-events:none;}
+.idar-btn-solid:hover:not(:disabled)::after{left:130%;}
+.idar-btn:not(.idar-btn-solid):hover:not(:disabled){background:${C.goldL}!important;}
+.nav-btn{transition:background .18s ease,transform .18s ease,border-color .18s ease;}
+.nav-btn:hover{background:rgba(255,255,255,0.24)!important;border-color:rgba(255,255,255,0.55)!important;transform:translateY(-1px);}
+.tab-btn{transition:color .18s ease,background .18s ease,border-color .18s ease;}
+.tab-btn:hover{color:${C.navy}!important;background:${C.goldL}!important;}
+.hover-lift{transition:transform .2s ease,box-shadow .2s ease;}
+.hover-lift:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(16,24,40,0.12);}
+.menu-item{transition:background .15s ease;}
+.menu-item:hover{background:${C.goldL}!important;}
+button:focus-visible{outline:2px solid ${C.gold};outline-offset:2px;}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;}}
+.page-main{transition:padding-right .25s ease;}
+@media(min-width:1180px){body.assistant-docked .page-main{padding-right:400px;}}
+@media(max-width:1179px){.assistant-panel{top:auto!important;height:min(560px,78vh)!important;}}
+.fadeIn{animation:fadeIn .3s ease both;}
+.slideDown{animation:slideDown .18s ease both;}
 .pulse{animation:pulse 2.5s infinite;}
+.ticket-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;}
+.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start;}
+.action-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.action-grid button{width:100%;}
+@media(max-width:900px){
+  .detail-grid{grid-template-columns:1fr;}
+  .detail-side{order:-1;}
+  .login-left{display:none!important;}
+  .login-right{flex:1 1 100%!important;}
+}
 @media(max-width:640px){
   .hide-sm{display:none!important;}
   .grid-2{grid-template-columns:1fr!important;}
   .grid-3{grid-template-columns:1fr 1fr!important;}
+  .assistant-panel{right:10px!important;bottom:10px!important;}
   body{font-size:14px;}
+}
+@media(max-width:420px){
+  .ticket-grid{grid-template-columns:1fr;}
+  .action-grid{grid-template-columns:1fr;}
 }
 @media(max-width:380px){
   body{font-size:13.5px;}
-}
-@media(max-width:900px){
-  .login-left{display:none!important;}
-  .login-right{flex:1 1 100%!important;}
 }
 @supports(padding:max(0px)){
   body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);}
@@ -446,13 +628,12 @@ class ErrorBoundary extends Component {
           padding: 24, background: '#f4f8f6', fontFamily: "'DM Sans',sans-serif", textAlign: 'center'
         }}>
           <div style={{ maxWidth: 380 }}>
-            <div style={{ fontSize: 40, marginBottom: 10 }}>⚠️</div>
-            <div style={{ fontWeight: 700, fontSize: 18, color: '#132621', marginBottom: 8 }}>Something went wrong</div>
+                        <div style={{ fontWeight: 700, fontSize: 18, color: '#132621', marginBottom: 8 }}>Something went wrong</div>
             <div style={{ fontSize: 13.5, color: '#68786f', marginBottom: 18, lineHeight: 1.6 }}>
               This screen hit an unexpected error. Your data is safe — just reload to continue.
             </div>
             <button onClick={() => window.location.reload()} style={{
-              background: '#0b4f43', color: '#fff', border: 'none', borderRadius: 10,
+              background: C.navy, color: '#fff', border: 'none', borderRadius: 10,
               padding: '12px 28px', fontSize: 14, fontWeight: 700, cursor: 'pointer'
             }}>Reload App</button>
           </div>
@@ -462,98 +643,128 @@ class ErrorBoundary extends Component {
     return this.props.children;
   }
 }
-function Btn({ children, onClick, variant = 'primary', size = 'md', style = {}, disabled = false, type = 'button' }) {
+function Btn({ children, onClick, variant = 'primary', size = 'md', style = {}, disabled = false, type = 'button', title }) {
   const vs = {
-    primary: { background: `linear-gradient(135deg,${C.navy2},${C.navy3})`, color: '#fff', border: `1px solid ${C.navy}`, boxShadow: '0 2px 8px #0b4f4330' },
-    gold: { background: `linear-gradient(135deg,${C.navy3},${C.gold},${C.gold2})`, color: '#fff', border: `1px solid ${C.gold}`, boxShadow: '0 2px 8px #12a37f40', fontWeight: 700 },
-    success: { background: `linear-gradient(135deg,#0c5e2f,#0f7a3d)`, color: '#fff', border: 'none', boxShadow: '0 1px 4px #0f7a3d40' },
-    danger: { background: `linear-gradient(135deg,#8f1c16,#c0261e)`, color: '#fff', border: 'none', boxShadow: '0 1px 4px #c0261e40' },
-    warning: { background: `linear-gradient(135deg,#92400e,#b45309)`, color: '#fff', border: 'none', boxShadow: '0 1px 4px #b4530940' },
-    purple: { background: `linear-gradient(135deg,#5b21b6,#7c3aed)`, color: '#fff', border: 'none', boxShadow: '0 1px 4px #7c3aed40' },
+    primary: { background: `linear-gradient(135deg,${C.navy},${C.navy3})`, color: '#fff', border: `1px solid ${C.navy}`, boxShadow: `0 1px 3px ${C.navy}40` },
+    gold: { background: `linear-gradient(135deg,${C.gold},${C.gold2})`, color: '#fff', border: `1px solid ${C.gold}`, boxShadow: `0 1px 3px ${C.gold}40` },
+    success: { background: 'linear-gradient(135deg,#146b3b,#1c8a4c)', color: '#fff', border: '1px solid #146b3b', boxShadow: '0 1px 3px rgba(20,107,59,0.35)' },
+    danger: { background: '#fff', color: C.red, border: `1px solid ${C.red}66` },
+    warning: { background: '#fff', color: C.yellow, border: `1px solid ${C.yellow}66` },
+    purple: { background: `linear-gradient(135deg,${C.gold},${C.gold2})`, color: '#fff', border: `1px solid ${C.gold}`, boxShadow: `0 1px 3px ${C.gold}40` },
+    soft: { background: C.goldL, color: C.navy, border: `1px solid ${C.border2}` },
     ghost: { background: 'transparent', color: C.muted, border: `1px solid ${C.border2}` },
-    outline: { background: 'transparent', color: C.accent, border: `1.5px solid ${C.accent}` },
+    outline: { background: '#fff', color: C.navy, border: `1px solid ${C.navy}80` },
   };
   const ss = {
-    sm: { padding: '6px 14px', fontSize: 12.5, borderRadius: 8 },
-    md: { padding: '10px 22px', fontSize: 14, borderRadius: 9 },
-    lg: { padding: '14px 30px', fontSize: 16, borderRadius: 11 }
+    sm: { padding: '7px 14px', fontSize: 12.5, borderRadius: 8 },
+    md: { padding: '10px 20px', fontSize: 14, borderRadius: 9 },
+    lg: { padding: '13px 28px', fontSize: 15, borderRadius: 10 }
   };
   return (
-    <button type={type} onClick={onClick} disabled={disabled}
+    <button type={type} onClick={onClick} disabled={disabled} title={title}
+      className={`idar-btn${['primary', 'gold', 'success', 'purple'].includes(variant) ? ' idar-btn-solid' : ''}`}
       style={{
         ...vs[variant], ...ss[size], fontWeight: 600, cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? .55 : 1, transition: 'all .18s', letterSpacing: .2, ...style
+        opacity: disabled ? .55 : 1, letterSpacing: .1, ...style
       }}>
       {children}
     </button>
   );
 }
 
-function Card({ children, style = {}, className = '' }) {
+function Card({ children, style = {}, className = '', ...rest }) {
   return (
-    <div className={className} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, boxShadow: '0 2px 12px #0b2a2210', ...style }}>
+    <div className={className} {...rest}
+      style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: '0 1px 2px rgba(16,24,40,0.04)', ...style }}>
       {children}
     </div>
   );
 }
 
 function Badge({ status }) {
-  const m = STATUS_CFG[status] || { label: status, color: C.muted, bg: '#f1f5f9', dot: C.muted };
+  const m = STATUS_CFG[status] || { label: status, color: C.muted, bg: 'rgba(100,116,139,0.10)', dot: C.muted };
   return (
     <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 99,
-      fontSize: 11, fontWeight: 700, color: m.color, background: m.bg, letterSpacing: .3
+      display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 99,
+      fontSize: 11, fontWeight: 600, color: m.color, background: m.bg, letterSpacing: .2, whiteSpace: 'nowrap'
     }}>
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.dot, flexShrink: 0 }} />
-      {m.label.toUpperCase()}
+      {m.label}
     </span>
   );
 }
 
-function StatCard({ icon, label, value, color, bg, onClick, active }) {
+function KpiTile({ label, value, note, color, bg }) {
   return (
-    <div className="fadeUp" onClick={onClick} style={{
-      background: C.card, border: `1px solid ${active ? color : C.border}`, borderRadius: 16,
-      padding: '24px 26px', flex: '1 1 200px', minWidth: 200, boxShadow: active ? `0 4px 18px ${color}30` : '0 2px 12px #0b2a2208',
-      position: 'relative', overflow: 'hidden', cursor: onClick ? 'pointer' : 'default', transition: 'all .15s'
-    }}>
-      <div style={{ position: 'absolute', top: 0, right: 0, width: 90, height: 90, borderRadius: '0 16px 0 90px', background: bg, opacity: .4 }} />
-      <div style={{
-        width: 50, height: 50, borderRadius: 13, background: bg,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, marginBottom: 16,
-        border: `1px solid ${color}22`, fontWeight: 800, color, fontFamily: "'JetBrains Mono',monospace"
-      }}>{icon}</div>
-      <div style={{ fontSize: 36, fontWeight: 700, color, fontFamily: "'JetBrains Mono',monospace", lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 13, color: C.muted, marginTop: 8, fontWeight: 500, letterSpacing: .3 }}>{label}</div>
+    <div className="hover-lift" style={{ background: bg, border: `1px solid ${color}26`, borderRadius: 12, padding: '14px 16px', minWidth: 0 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase', color }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color, margin: '6px 0 2px', lineHeight: 1.1 }}>{value}</div>
+      {note && <div style={{ fontSize: 11.5, color: C.muted }}>{note}</div>}
     </div>
   );
 }
 
-function Modal({ open, onClose, title, children, width = 520 }) {
+function Modal({ open, onClose, title, children, width = 520, fullscreen = false, z = 1000 }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape' && onClose) onClose(); };
+    document.addEventListener('keydown', onKey);
+    let prev = '';
+    if (fullscreen) { prev = document.documentElement.style.overflow; document.documentElement.style.overflow = 'hidden'; }
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (fullscreen) document.documentElement.style.overflow = prev;
+    };
+  }, [open, fullscreen, onClose]);
   if (!open) return null;
+  const headBg = `linear-gradient(90deg,${C.navy2},${C.navy3})`;
+  const closeBtn = (
+    <button onClick={onClose} aria-label="Close" className="nav-btn" style={{
+      background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.4)',
+      color: '#fff', fontSize: 20, cursor: 'pointer', lineHeight: 1, width: 34, height: 34,
+      borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+    }}>&times;</button>
+  );
+  // Large dialog: opens below the navbar (navbar stays in place) and closes back to the list.
+  if (fullscreen) {
+    return (
+      <div className="fadeIn" onClick={e => e.target === e.currentTarget && onClose()}
+        style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, top: 'var(--nav-h, 0px)', zIndex: z,
+          background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+        }}>
+        <div className="fadeUp" style={{
+          width: '100%', maxWidth: 1240, height: '100%', background: C.off, borderRadius: 18, overflow: 'hidden',
+          display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(15,23,42,0.35)', border: '1px solid rgba(255,255,255,0.7)'
+        }}>
+          <div style={{ background: headBg, color: '#fff', flexShrink: 0, padding: '14px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ fontWeight: 600, fontSize: 16, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+            {closeBtn}
+          </div>
+          <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px 28px' }}>{children}</div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: '#0b2a2280', zIndex: 1000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, backdropFilter: 'blur(4px)'
+      position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: z,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12
     }}
       onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="fadeUp" style={{
-        background: C.card, borderRadius: 20, width: '100%', maxWidth: width,
-        maxHeight: '90vh', overflow: 'auto', boxShadow: '0 30px 80px #0b2a2240'
+        background: C.card, borderRadius: 16, width: '100%', maxWidth: width,
+        maxHeight: '92vh', overflow: 'auto', boxShadow: '0 24px 60px rgba(15,23,42,0.28)'
       }}>
         <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '18px 24px', borderBottom: `1px solid ${C.border}`,
-          background: `linear-gradient(135deg,${C.navy},${C.navy3})`, borderRadius: '20px 20px 0 0'
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+          padding: '14px 20px', background: headBg, position: 'sticky', top: 0, borderRadius: '16px 16px 0 0', zIndex: 2
         }}>
-          <span style={{ fontWeight: 700, fontSize: 16, color: '#fff', fontFamily: "'Poppins',sans-serif", letterSpacing: .5 }}>{title}</span>
-          <button onClick={onClose} style={{
-            background: 'rgba(255,255,255,0.15)', border: 'none',
-            color: '#fff', fontSize: 20, cursor: 'pointer', lineHeight: 1, width: 30, height: 30,
-            borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}>×</button>
+          <span style={{ fontWeight: 600, fontSize: 15.5, color: '#fff' }}>{title}</span>
+          {closeBtn}
         </div>
-        <div style={{ padding: 24 }}>{children}</div>
+        <div style={{ padding: 22 }}>{children}</div>
       </div>
     </div>
   );
@@ -742,9 +953,11 @@ function FieldLabel({ children, required }) {
 }
 
 const inputStyle = {
-  width: '100%', background: '#f7f8fc', border: `1.5px solid ${C.border}`,
-  borderRadius: 10, padding: '11px 14px', color: C.text, fontSize: 14, outline: 'none',
-  transition: 'border .15s', lineHeight: 1.4
+  width: '100%', borderRadius: 10, padding: '10px 14px', fontSize: 14, outline: 'none',
+  transition: 'border .15s, box-shadow .15s', lineHeight: 1.4,
+  get background() { return '#fff'; },
+  get border() { return `1px solid ${C.border2}`; },
+  get color() { return C.text; },
 };
 
 // ── SEARCHABLE DROPDOWN (supports free-text / custom entries) ─────────
@@ -809,7 +1022,7 @@ function SearchDropdown({ label, value, onChange, options, placeholder = 'Search
                 background: value === o ? C.blueL : 'transparent', fontWeight: value === o ? 600 : 400,
                 transition: 'background .1s', borderRadius: 4
               }}
-              onMouseEnter={e => { if (value !== o) e.currentTarget.style.background = '#f0f4ff'; }}
+              onMouseEnter={e => { if (value !== o) e.currentTarget.style.background = C.goldL; }}
               onMouseLeave={e => { if (value !== o) e.currentTarget.style.background = 'transparent'; }}>
               {o}
             </div>
@@ -829,48 +1042,115 @@ function SearchDropdown({ label, value, onChange, options, placeholder = 'Search
   );
 }
 
+// Shared by the Add User and Edit User dialogs.
+function UserTypeFields({ form, set, headOptions }) {
+  const radio = (value, title, desc) => (
+    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: C.text2, padding: '8px 0', cursor: 'pointer' }}>
+      <input type="radio" style={{ marginTop: 3 }} checked={form.userType === value} onChange={() => set('userType', value)} />
+      <span><strong style={{ color: C.text }}>{title}</strong><span style={{ color: C.muted }}> — {desc}</span></span>
+    </label>
+  );
+  const toggle = (key, val) => {
+    const list = form[key] || [];
+    set(key, list.includes(val) ? list.filter(x => x !== val) : [...list, val]);
+  };
+  const chipBtn = { fontSize: 11.5, background: 'none', border: `1px solid ${C.border2}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', color: C.text2 };
+  const listBox = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: 8, maxHeight: 200, overflow: 'auto', background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 };
+  const heads = form.headUsernames || [];
+  const cats = form.adminCategories || [];
+  return (
+    <div style={{ marginBottom: 16, background: C.off, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 14px' }}>
+      <FieldLabel>User Type</FieldLabel>
+      {radio('employee', 'Employee', 'raises and tracks own tickets')}
+      {radio('categoryAdmin', 'Head / Category Admin', 'manages selected categories and allocates tickets to technicians')}
+      {radio('technician', 'Technician', 'works only on tickets allocated by a head')}
+      {radio('fullAdmin', 'Full Admin', 'all categories, users and logs')}
+
+      {(form.userType === 'categoryAdmin' || form.userType === 'fullAdmin' || form.userType === 'technician') && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: C.text2, margin: '8px 0 0', paddingTop: 12, borderTop: `1px solid ${C.border}`, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!form.alsoEmployee} onChange={e => set('alsoEmployee', e.target.checked)} />
+          Also allow raising own tickets (Employee view)
+        </label>
+      )}
+
+      {form.userType === 'technician' && (
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: C.text2 }}>Reports to (one or more heads)</span>
+            <span style={{ fontSize: 11.5, color: C.muted }}>{heads.length} selected</span>
+          </div>
+          {headOptions.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: C.muted }}>No heads available. Create a Head / Category Admin first.</div>
+          ) : (
+            <div style={listBox}>
+              {headOptions.map(h => (
+                <label key={h.username} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: C.text2, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={heads.includes(h.username)} onChange={() => toggle('headUsernames', h.username)} />
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.displayName || h.username}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {form.userType === 'categoryAdmin' && (
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: C.text2, marginBottom: 8 }}>Categories managed</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => set('adminCategories', [...COMPLAINT_TYPES])} style={chipBtn}>Select all</button>
+            <button type="button" onClick={() => set('adminCategories', [])} style={chipBtn}>Clear</button>
+            <span style={{ fontSize: 11.5, color: C.muted }}>{cats.length} selected</span>
+          </div>
+          <div style={listBox}>
+            {COMPLAINT_TYPES.map(t => (
+              <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: C.text2, cursor: 'pointer' }}>
+                <input type="checkbox" checked={cats.includes(t)} onChange={() => toggle('adminCategories', t)} />
+                {t}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BellIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+    </svg>
+  );
+}
+
 // ── STATUS TIMELINE ───────────────────────────────────────────
 function Timeline({ history }) {
   if (!history || history.length === 0) return null;
   return (
     <div style={{ position: 'relative' }}>
       {history.map((h, i) => (
-        <div key={i} style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, width: 22 }}>
+        <div key={i} style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, width: 14 }}>
             <div style={{
-              width: 14, height: 14, borderRadius: '50%',
-              background: STATUS_CFG[h.status]?.dot || C.muted, marginTop: 3,
-              boxShadow: `0 0 0 4px ${STATUS_CFG[h.status]?.bg || '#f1f5f9'}`, flexShrink: 0
+              width: 10, height: 10, borderRadius: '50%',
+              background: STATUS_CFG[h.status]?.dot || C.muted, marginTop: 5, flexShrink: 0
             }} />
             {i < history.length - 1 && (
-              <div style={{
-                width: 2, flex: 1, background: `linear-gradient(${STATUS_CFG[h.status]?.dot || C.muted},${C.border})`,
-                margin: '5px 0', minHeight: 20
-              }} />
+              <div style={{ width: 1, flex: 1, background: C.border2, margin: '4px 0', minHeight: 18 }} />
             )}
           </div>
-          <div style={{ flex: 1, paddingBottom: 4 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
+          <div style={{ flex: 1, paddingBottom: 2, minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap', gap: 6 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <Badge status={h.status} />
-                {h.actionBy && (
-                  <span style={{
-                    fontSize: 11, background: C.navy, color: '#fff', borderRadius: 99,
-                    padding: '2px 9px', fontWeight: 600
-                  }}>
-                    {h.actionBy}
-                  </span>
-                )}
+                {h.actionBy && <span style={{ fontSize: 12, color: C.text2, fontWeight: 600 }}>{h.actionBy}</span>}
               </div>
-              <span style={{ fontSize: 11, color: C.muted, fontFamily: "'JetBrains Mono',monospace" }}>{fmtDT(h.at)}</span>
+              <span style={{ fontSize: 11, color: C.muted }}>{fmtDT(h.at)}</span>
             </div>
-            <div style={{
-              background: STATUS_CFG[h.status]?.bg || C.off, borderRadius: 10, padding: '10px 13px',
-              border: `1px solid ${STATUS_CFG[h.status]?.dot || C.border}22`
-            }}>
-              <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.6 }}>{h.note}</div>
-              {h.by && <div style={{ fontSize: 11, color: C.muted, marginTop: 5, fontWeight: 600 }}>Submitted by: {h.by}</div>}
-            </div>
+            <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.55, wordBreak: 'break-word' }}>{h.note}</div>
+            {h.by && <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>Raised by {h.by}</div>}
           </div>
         </div>
       ))}
@@ -878,81 +1158,147 @@ function Timeline({ history }) {
   );
 }
 
-// ── ENTERPRISE TOP NAVBAR ──────────────────────────────────────
-function TopBar({ subtitle, roleLabel, user, onLogout, tabs, activeTab, onTabChange, tabBadges = {}, maxWidth = 1100, extraActions = null }) {
+function SearchIcon() {
   return (
-    <div style={{ position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 2px 14px #0b4f4330' }}>
-      {/* Row 1 — brand navbar */}
-      <div style={{ background: `linear-gradient(90deg,${C.navy2},${C.navy3})` }}>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
+
+function PaletteIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-3.9-4-7.2-9-7.2z" />
+      <circle cx="7.5" cy="11" r="1" /><circle cx="10" cy="7.2" r="1" /><circle cx="14.5" cy="7.2" r="1" />
+    </svg>
+  );
+}
+
+const NAV_ICON_BTN = {
+  position: 'relative', background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.32)',
+  borderRadius: 8, width: 36, height: 36, cursor: 'pointer', color: '#fff',
+  display: 'flex', alignItems: 'center', justifyContent: 'center'
+};
+
+function ThemeMenu({ light = false }) {
+  const { key, setKey } = useContext(ThemeContext);
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(o => !o)} aria-label="Change theme" title="Theme" className={light ? '' : 'nav-btn'}
+        style={light ? { ...NAV_ICON_BTN, background: '#fff', border: `1px solid ${C.border2}`, color: C.navy, boxShadow: '0 2px 8px rgba(16,24,40,0.08)' } : NAV_ICON_BTN}>
+        <PaletteIcon />
+      </button>
+      {open && (
+        <div className="slideDown" style={{
+          position: 'absolute', top: 44, right: 0, width: 220, background: '#fff', borderRadius: 12,
+          border: `1px solid ${C.border}`, boxShadow: '0 16px 40px rgba(16,24,40,0.18)', zIndex: 500, padding: 6
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase', color: C.muted, padding: '8px 10px 6px' }}>Theme</div>
+          {Object.entries(THEMES).map(([k, t]) => (
+            <button key={k} onClick={() => { setKey(k); setOpen(false); }} className="menu-item"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 10px', borderRadius: 8,
+                border: 'none', background: key === k ? C.goldL : 'transparent', cursor: 'pointer', textAlign: 'left',
+                fontSize: 13, color: C.text, fontWeight: key === k ? 600 : 500
+              }}>
+              <span style={{
+                width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                background: `linear-gradient(135deg,${t.navy2},${t.gold2})`, border: '2px solid #fff', boxShadow: `0 0 0 1px ${t.navy}55`
+              }} />
+              <span style={{ flex: 1 }}>{t.label}</span>
+              {key === k && (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TopBar({ subtitle, roleLabel, user, onLogout, tabs, activeTab, onTabChange, tabBadges = {}, maxWidth = 1100, extraActions = null }) {
+  const barRef = useRef(null);
+  // Publish the navbar height so dialogs and the assistant can sit just below it.
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return undefined;
+    const apply = () => { const h = el.offsetHeight; if (h) document.documentElement.style.setProperty('--nav-h', `${h}px`); };
+    apply();
+    let ro = null;
+    if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(apply); ro.observe(el); }
+    window.addEventListener('resize', apply);
+    return () => { window.removeEventListener('resize', apply); if (ro) ro.disconnect(); };
+  }, []);
+  return (
+    <div ref={barRef} id="idar-topbar" style={{ position: 'sticky', top: 0, zIndex: 1100, boxShadow: '0 4px 18px rgba(16,24,40,0.14)' }}>
+      <div style={{
+        background: `linear-gradient(100deg,${C.navy2}f5,${C.navy3}f2)`, backdropFilter: 'blur(16px) saturate(160%)',
+        WebkitBackdropFilter: 'blur(16px) saturate(160%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)'
+      }}>
         <div style={{
           maxWidth, margin: '0 auto', padding: '10px 16px', minHeight: 60,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', rowGap: 8
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
             <div style={{
-              width: 38, height: 38, borderRadius: 9, background: '#fff', display: 'flex',
+              width: 38, height: 38, borderRadius: 10, background: '#fff', display: 'flex',
               alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0
             }}>
-              <img src={chrclogo} alt="Logo" style={{ width: 26, height: 26, objectFit: 'contain' }} />
+              <img src={chrclogo} alt="Logo" style={{ width: 27, height: 27, objectFit: 'contain' }} />
             </div>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: '#fff', fontFamily: "'Poppins',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '52vw' }}>
-                CHRC IDAR TICKET SYSTEM
+              <div style={{ fontWeight: 600, fontSize: 15.5, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '52vw' }}>
+                CHRC IDAR Ticket System
               </div>
-              <div className="hide-sm" style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', letterSpacing: .3 }}>{subtitle}</div>
+              <div className="hide-sm" style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.7)' }}>{subtitle}</div>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', rowGap: 8 }}>
             {extraActions}
+            <ThemeMenu />
             <div className="hide-sm" style={{
-              display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.1)',
-              borderRadius: 99, padding: '4px 12px 4px 4px'
+              display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.22)',
+              borderRadius: 99, padding: '3px 14px 3px 3px'
             }}>
               <div style={{
-                width: 28, height: 28, borderRadius: '50%', background: C.gold, color: '#fff',
+                width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,255,255,0.9)', color: C.navy,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700
               }}>{(user.displayName || '?').charAt(0).toUpperCase()}</div>
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>{user.displayName}</span>
+              <div style={{ lineHeight: 1.2 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>{user.displayName}</div>
+                <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.7)' }}>{roleLabel}</div>
+              </div>
             </div>
             <Btn onClick={onLogout} variant="ghost" size="sm"
-              style={{ color: '#fff', border: '1px solid rgba(255,255,255,0.3)' }}>Logout</Btn>
+              style={{ color: '#fff', border: '1px solid rgba(255,255,255,0.35)' }}>Logout</Btn>
           </div>
         </div>
       </div>
-      {/* Row 2 — status strip */}
-      <div style={{ background: '#eef3fa', borderBottom: `1px solid ${C.border2}` }}>
-        <div style={{
-          maxWidth, margin: '0 auto', padding: '6px 16px', display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between', gap: 10, flexWrap: 'wrap'
-        }}>
-          <div style={{ fontSize: 11, color: C.muted, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-            <span><strong style={{ color: C.text2 }}>Choithram Hospital &amp; Research Centre</strong></span>
-            <span className="hide-sm">{user.displayName} ({user.username})</span>
-            <span className="hide-sm">{roleLabel}</span>
-          </div>
-          <div style={{ fontSize: 11, color: '#0f7a3d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#0f7a3d', display: 'inline-block', animation: 'pulse 2s infinite' }} />
-            Logged In
-          </div>
-        </div>
-      </div>
-      {/* Row 3 — tabs */}
       {tabs && (
-        <div style={{ background: '#fff', borderBottom: `1px solid ${C.border}` }}>
-          <div style={{ maxWidth, margin: '0 auto', padding: '0 16px', display: 'flex', gap: 2, overflowX: 'auto' }}>
+        <div style={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ maxWidth, margin: '0 auto', padding: '0 12px', display: 'flex', gap: 2, overflowX: 'auto' }}>
             {tabs.map(([k, l]) => (
-              <button key={k} onClick={() => onTabChange(k)}
+              <button key={k} onClick={() => onTabChange(k)} className="tab-btn"
                 style={{
-                  padding: '13px 20px', background: 'none', border: 'none', whiteSpace: 'nowrap',
+                  padding: '12px 18px', background: 'none', border: 'none', whiteSpace: 'nowrap',
                   borderBottom: `2.5px solid ${activeTab === k ? C.gold : 'transparent'}`,
                   color: activeTab === k ? C.navy : C.muted,
-                  fontWeight: activeTab === k ? 700 : 600, fontSize: 13.5, cursor: 'pointer', transition: 'all .15s'
+                  fontWeight: activeTab === k ? 600 : 500, fontSize: 13.5, cursor: 'pointer', transition: 'all .15s'
                 }}>
                 {l}
                 {tabBadges[k] > 0 && (
                   <span style={{
-                    background: C.gold, color: '#fff', borderRadius: 99,
-                    fontSize: 10, padding: '1px 7px', marginLeft: 6, fontWeight: 700
+                    background: C.goldL, color: C.navy, borderRadius: 99, border: `1px solid ${C.border}`,
+                    fontSize: 10.5, padding: '1px 7px', marginLeft: 6, fontWeight: 600
                   }}>{tabBadges[k]}</span>
                 )}
               </button>
@@ -964,6 +1310,1076 @@ function TopBar({ subtitle, roleLabel, user, onLogout, tabs, activeTab, onTabCha
   );
 }
 
+// Shared layout for the full-screen ticket window (employee + admin + technician).
+function SectionCard({ title, children, style = {} }) {
+  return (
+    <Card style={{ padding: 18, marginBottom: 14, ...style }}>
+      {title && (
+        <div style={{ fontSize: 11.5, color: C.muted, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase', marginBottom: 10 }}>{title}</div>
+      )}
+      {children}
+    </Card>
+  );
+}
+
+function TicketDetailView({ ticket: t, viewer, mainExtra = null, sideActions = null }) {
+  const done = t.status === 'resolved' || t.status === 'closed';
+  const sla = slaState(t, Date.now());
+  const info = [
+    ['Ticket ID', t.id, true],
+    ['Category', typeKey(t.type)],
+    ['Department / Location', t.dept],
+    ['Raised By', t.userName],
+    ['Employee ID', t.empId],
+    ['Raised On', t.at ? fmtDT(t.at) : ''],
+    ['Assigned Technician', t.assignedToName],
+    ['Allocated By', t.assignedByName],
+    ['Allocated On', t.assignedAt ? fmtDT(t.assignedAt) : ''],
+    ['Resolved By', done ? t.actionBy : ''],
+    ['Resolved On', done && t.actionAt ? fmtDT(t.actionAt) : ''],
+    ['Time Taken', done && t.actionAt ? getDuration(t.at, t.actionAt) : '']
+  ];
+  const showNote = t.status === 'hold' && t.holdReason && !/^Allocated/.test(t.holdReason);
+  const text = { fontSize: 13.5, color: C.text2, lineHeight: 1.65, wordBreak: 'break-word', whiteSpace: 'pre-wrap' };
+  return (
+    <div className="detail-grid">
+      <div style={{ minWidth: 0 }}>
+        <Card style={{ padding: '16px 18px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+            <Badge status={t.status} />
+            <PriorityBadge priority={t.priority} />
+            {sla && (
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#9a5b0b', background: 'rgba(217,119,6,0.10)', padding: '3px 10px', borderRadius: 99 }}>
+                No update for {fmtSpan(sla.idle)}
+              </span>
+            )}
+          </div>
+          <TicketStepper c={t} />
+        </Card>
+        <SectionCard title="Issue Description"><div style={text}>{na(t.desc)}</div></SectionCard>
+        {showNote && <SectionCard title="Latest Update"><div style={text}>{t.holdReason}</div></SectionCard>}
+        {t.status === 'refused' && <SectionCard title="Reason for Refusal"><div style={text}>{na(t.refuseReason)}</div></SectionCard>}
+        {t.solution && <SectionCard title="Action Taken"><div style={text}>{t.solution}</div></SectionCard>}
+        {mainExtra}
+        {viewer !== 'employee' && t.assignHistory && t.assignHistory.length > 0 && (
+          <SectionCard title="Allocation History">
+            <div style={{ ...text, whiteSpace: 'normal' }}>
+              <div>1. Raised by <strong>{t.userName}</strong> on {fmtDT(t.at)}</div>
+              {t.assignHistory.map((h, i) => (
+                <div key={i}>{i + 2}. <strong>{h.byName || h.by}</strong> allocated to <strong>{h.toName || h.to}</strong> on {fmtDT(h.at)}{h.note ? ` (${h.note})` : ''}</div>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+        <SectionCard title="Status Timeline"><Timeline history={t.history} /></SectionCard>
+      </div>
+      <div className="detail-side" style={{ minWidth: 0 }}>
+        <SectionCard title="Ticket Details">
+          {info.map(([k, v, mono], i) => (
+            <div key={k} style={{
+              display: 'flex', justifyContent: 'space-between', gap: 14, padding: '8px 0',
+              borderBottom: i === info.length - 1 ? 'none' : `1px solid ${C.border}`
+            }}>
+              <span style={{ fontSize: 12.5, color: C.muted, flexShrink: 0 }}>{k}</span>
+              <span style={{
+                fontSize: 13, fontWeight: 600, color: na(v) === 'N/A' ? C.muted : C.text, textAlign: 'right', wordBreak: 'break-word',
+                fontFamily: mono ? "'JetBrains Mono',monospace" : 'inherit'
+              }}>{na(v)}</span>
+            </div>
+          ))}
+        </SectionCard>
+        {sideActions && <SectionCard title="Actions"><div className="action-grid">{sideActions}</div></SectionCard>}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+//  TICKET ASSISTANT — live tracking for active tickets only
+//  - Open by default, narrates progress as automated messages
+//  - Employee sees head / technician actions on their own ticket
+//  - Technician sees the head's instructions, head sees technician updates
+//  - Reminds technician / head when an active ticket goes quiet (SLA_HOURS)
+//  - Resolved or closed tickets drop out; a new complaint starts a fresh feed
+// ══════════════════════════════════════════════════════════════
+const inferActorRole = (h, c) => {
+  if (h.role) return h.role;
+  if (h.kind === 'allocation') return 'head';
+  if (c.assignedToName && h.actionBy && h.actionBy === c.assignedToName) return 'technician';
+  return 'admin';
+};
+
+const isActiveTicket = (c) => c && (c.status === 'open' || c.status === 'hold');
+
+const assistantText = (viewer, c, h, i, prev, meName) => {
+  const id = c.id;
+  const actor = h.actionBy || 'The support team';
+  const role = inferActorRole(h, c);
+  const detail = (h.detail || '').trim();
+  const mine = viewer !== 'employee' && h.actionBy && meName && h.actionBy === meName;
+  const who = role === 'technician' ? `Technician ${actor}` : actor;
+
+  if (i === 0) {
+    if (viewer === 'employee') return `Your ticket ${id} (${typeKey(c.type)}) has been registered. It will be reviewed and allocated shortly.`;
+    if (viewer === 'head') return `New ticket ${id} from ${c.userName}, ${c.dept} (${typeKey(c.type)}). Awaiting allocation.`;
+    return null;
+  }
+  if (h.kind === 'allocation') {
+    const tech = h.techName || c.assignedToName || 'a technician';
+    const ins = (h.instruction || '').trim();
+    if (viewer === 'employee') return `${actor} has allocated ticket ${id} to technician ${tech}.${ins ? ` Instruction given: "${ins}"` : ''}`;
+    if (viewer === 'technician') return `${actor} allocated ticket ${id} to you (${typeKey(c.type)}, ${c.dept}).${ins ? ` Instruction: "${ins}"` : ' No additional instructions.'}`;
+    return null;
+  }
+  if (h.status === 'hold') {
+    const txt = detail || h.note || 'Work is in progress.';
+    if (mine) return null;
+    if (viewer === 'employee') return `${who} posted an update on ${id}: ${txt}`;
+    if (viewer === 'head') return role === 'technician' ? `${who} posted an update on ${id}: ${txt}` : null;
+    return role !== 'technician' ? `${actor} updated ${id}: ${txt}` : null;
+  }
+  return null;
+};
+
+const finalText = (viewer, c) => {
+  const id = c.id;
+  if (c.status === 'refused') {
+    const why = (c.refuseReason || '').trim();
+    return viewer === 'employee'
+      ? `Ticket ${id} could not be taken forward.${why ? ` Reason: ${why}` : ''}`
+      : `Ticket ${id} was refused.${why ? ` Reason: ${why}` : ''}`;
+  }
+  const by = (c.actionBy || '').trim();
+  const sol = (c.solution || '').trim();
+  return viewer === 'employee'
+    ? `Ticket ${id} has been resolved${by ? ` by ${by}` : ''}.${sol ? ` Action taken: ${sol}` : ''}`
+    : `Ticket ${id} (${c.dept}) has been resolved${by ? ` by ${by}` : ''}.`;
+};
+
+const slaText = (viewer, c, sla) => {
+  const span = fmtSpan(sla.idle);
+  if (viewer === 'employee') {
+    return c.assignedToName
+      ? `Ticket ${c.id} is taking longer than expected (no update for ${span}). It is with technician ${c.assignedToName}; the technician and department head have been reminded.`
+      : `Ticket ${c.id} is taking longer than expected (no update for ${span}). The department head has been reminded.`;
+  }
+  if (viewer === 'technician') return `Reminder: ticket ${c.id} (${c.dept}) has had no update for ${span}. Please post an update or resolve it.`;
+  return c.assignedToName
+    ? `Technician ${c.assignedToName} has not updated ticket ${c.id} for ${span}. Please follow up.`
+    : `Ticket ${c.id} (${typeKey(c.type)}, ${c.dept}) has been waiting for allocation for ${span}.`;
+};
+
+const buildAssistantEvents = (tickets, viewer, meName, nowMs) => {
+  const out = [];
+  (tickets || []).filter(isActiveTicket).forEach(c => {
+    const hist = c.history || [];
+    hist.forEach((h, i) => {
+      const text = assistantText(viewer, c, h, i, hist[i - 1], meName);
+      if (text) out.push({ key: `${c._docId || c.id}:${i}`, at: h.at, ticketId: c.id, text, kind: h.kind === 'allocation' ? 'allocation' : (i === 0 ? 'new' : 'update') });
+    });
+    const sla = slaState(c, nowMs);
+    if (sla) {
+      const at = new Date(new Date(lastActivityAt(c)).getTime() + sla.n * sla.limit).toISOString();
+      out.push({ key: `sla:${c._docId || c.id}:${sla.n}`, at, ticketId: c.id, text: slaText(viewer, c, sla), kind: 'alert' });
+    }
+  });
+  return out.sort((a, b) => new Date(a.at) - new Date(b.at));
+};
+
+const ASSISTANT_KIND = {
+  new: { label: 'New ticket', color: '#2563eb' },
+  allocation: { label: 'Allocation', color: '#7c3aed' },
+  update: { label: 'Update', color: '#0f766e' },
+  alert: { label: 'Reminder', color: '#c2410c' },
+  final: { label: 'Completed', color: '#15803d' },
+};
+
+function AssistantAvatar({ size = 30 }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0, position: 'relative',
+      background: `linear-gradient(135deg,${C.navy},${C.navy3})`, color: '#fff', display: 'flex', alignItems: 'center',
+      justifyContent: 'center', fontSize: size * 0.34, fontWeight: 700, letterSpacing: .4, boxShadow: `0 2px 8px ${C.navy}44`
+    }}>AI</div>
+  );
+}
+
+const dayLabel = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const today = new Date();
+  const yest = new Date(Date.now() - 86400000);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yest.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+const clockLabel = (iso) => {
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+};
+
+const ASSISTANT_DOCK_MIN = 1180;
+
+function TicketAssistant({ tickets, viewer, me }) {
+  const nowMs = useNowTick(60000);
+  const events = useMemo(() => buildAssistantEvents(tickets, viewer, me.displayName, nowMs), [tickets, viewer, me.displayName, nowMs]);
+  const activeTickets = useMemo(() => (tickets || []).filter(isActiveTicket), [tickets]);
+  const activeCount = activeTickets.length;
+  const [open, setOpen] = useState(() => (typeof window === 'undefined' ? true : window.innerWidth >= ASSISTANT_DOCK_MIN));
+  const [unread, setUnread] = useState(0);
+  const [pending, setPending] = useState([]);
+  const [finals, setFinals] = useState([]);
+  const [live, setLive] = useState(null);
+  const [focus, setFocus] = useState('');
+  const knownRef = useRef(null);
+  const statusRef = useRef(null);
+  const queueRef = useRef([]);
+  const busyRef = useRef(false);
+  const timerRef = useRef(null);
+  const mountedRef = useRef(true);
+  const openRef = useRef(open);
+  const listRef = useRef(null);
+  const liveShown = live ? live.shown : -1;
+  const livePhase = live ? live.phase : '';
+
+  useEffect(() => { openRef.current = open; if (open) setUnread(0); }, [open]);
+
+  // On wide screens the assistant docks beside the page and the page content makes room for it.
+  useEffect(() => {
+    const apply = () => document.body.classList.toggle('assistant-docked', open && window.innerWidth >= ASSISTANT_DOCK_MIN);
+    apply();
+    window.addEventListener('resize', apply);
+    return () => { window.removeEventListener('resize', apply); document.body.classList.remove('assistant-docked'); };
+  }, [open]);
+
+  function runNext() {
+    if (!mountedRef.current) return;
+    const next = queueRef.current.shift();
+    if (!next) { busyRef.current = false; setLive(null); return; }
+    busyRef.current = true;
+    setLive({ ...next, phase: 'typing', shown: 0 });
+    const typingMs = 800 + Math.min(next.text.length * 6, 700);
+    timerRef.current = setTimeout(() => {
+      if (!mountedRef.current) return;
+      let shown = 0;
+      setLive(l => (l ? { ...l, phase: 'writing' } : l));
+      const tick = () => {
+        if (!mountedRef.current) return;
+        shown += 2;
+        if (shown >= next.text.length) {
+          setLive(null);
+          setPending(p => p.filter(k => k !== next.key));
+          timerRef.current = setTimeout(runNext, 400);
+          return;
+        }
+        setLive(l => (l ? { ...l, shown } : l));
+        timerRef.current = setTimeout(tick, 16);
+      };
+      tick();
+    }, typingMs);
+  }
+
+  useEffect(() => {
+    mountedRef.current = true;
+    // Tickets load asynchronously: whatever exists when the first data arrives is the
+    // baseline (shown instantly); only changes after that are typed out live.
+    const settle = setTimeout(() => { if (knownRef.current === null) knownRef.current = new Set(); }, 2500);
+    return () => { mountedRef.current = false; clearTimeout(timerRef.current); clearTimeout(settle); };
+  }, []);
+
+  // When an active ticket completes the assistant shows one closing message and drops the
+  // older ones. A brand-new complaint starts a fresh feed.
+  useEffect(() => {
+    const list = tickets || [];
+    const cur = {};
+    list.forEach(c => { cur[c._docId || c.id] = c.status; });
+    if (statusRef.current === null) {
+      if (list.length > 0) statusRef.current = cur;
+      return;
+    }
+    const prev = statusRef.current;
+    statusRef.current = cur;
+    const was = (c) => prev[c._docId || c.id];
+    const done = list.filter(c => (was(c) === 'open' || was(c) === 'hold') && (c.status === 'resolved' || c.status === 'closed' || c.status === 'refused'));
+    const created = list.filter(c => was(c) === undefined && isActiveTicket(c));
+    if (created.length > 0) setFinals([]);
+    if (done.length > 0) {
+      const fresh = done.map(c => ({
+        key: `final:${c._docId || c.id}`, at: c.actionAt || new Date().toISOString(),
+        ticketId: c.id, text: finalText(viewer, c), kind: 'final'
+      }));
+      if (openRef.current) {
+        queueRef.current.push(...fresh);
+        setPending(p => [...p, ...fresh.map(e => e.key)]);
+        setFinals(f => [...f.filter(x => !fresh.some(y => y.key === x.key)), ...fresh]);
+        if (!busyRef.current) runNext();
+      } else {
+        setFinals(f => [...f, ...fresh]);
+        setUnread(u => u + fresh.length);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickets, viewer]);
+
+  useEffect(() => {
+    if (knownRef.current === null) {
+      if (events.length > 0) knownRef.current = new Set(events.map(e => e.key));
+      return;
+    }
+    const fresh = events.filter(e => !knownRef.current.has(e.key));
+    if (fresh.length === 0) return;
+    fresh.forEach(e => knownRef.current.add(e.key));
+    if (!openRef.current) { setUnread(u => u + fresh.length); return; }
+    if (fresh.length > 3) return;
+    queueRef.current.push(...fresh);
+    setPending(p => [...p, ...fresh.map(e => e.key)]);
+    if (!busyRef.current) runNext();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+
+  useEffect(() => {
+    if (open && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [open, events.length, finals.length, pending.length, liveShown, livePhase, focus]);
+
+  // If the focused ticket is no longer active, go back to showing everything.
+  useEffect(() => {
+    if (focus && !activeTickets.some(c => c.id === focus) && !finals.some(f => f.ticketId === focus)) setFocus('');
+  }, [focus, activeTickets, finals]);
+
+  const feed = [...events, ...finals]
+    .filter(e => !pending.includes(e.key))
+    .filter(e => !focus || e.ticketId === focus)
+    .sort((a, b) => new Date(a.at) - new Date(b.at))
+    .slice(-60);
+  const roleTitle = viewer === 'employee' ? 'Live tracking of your tickets' : viewer === 'technician' ? 'Instructions and reminders' : 'Technician activity and reminders';
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} aria-label="Open ticket assistant" title="Ticket Assistant" className="nav-btn"
+        style={{
+          position: 'fixed', right: 18, bottom: 18, zIndex: 900, width: 54, height: 54, borderRadius: '50%',
+          background: `linear-gradient(135deg,${C.navy},${C.navy3})`, color: '#fff', border: '2px solid rgba(255,255,255,0.7)', cursor: 'pointer',
+          boxShadow: `0 10px 26px ${C.navy}66`, display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
+        </svg>
+        {unread > 0 && (
+          <span style={{
+            position: 'absolute', top: -4, right: -4, background: C.red, color: '#fff', borderRadius: 99,
+            fontSize: 10, fontWeight: 700, minWidth: 18, height: 18, display: 'flex', alignItems: 'center',
+            justifyContent: 'center', padding: '0 4px', border: '2px solid #fff'
+          }}>{unread > 9 ? '9+' : unread}</span>
+        )}
+      </button>
+    );
+  }
+
+  const kindOf = (k) => ASSISTANT_KIND[k] || ASSISTANT_KIND.update;
+  const bubble = (kind) => ({
+    background: '#fff', border: `1px solid ${C.border}`, boxShadow: `inset 3px 0 0 ${kindOf(kind).color}, 0 1px 2px rgba(16,24,40,0.05)`,
+    borderRadius: '4px 16px 16px 16px', padding: '10px 14px', fontSize: 12.5, lineHeight: 1.6, color: C.text2, wordBreak: 'break-word'
+  });
+  const tag = (e, typing) => (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4, fontSize: 10.5, color: C.muted }}>
+      <span style={{ fontFamily: "'JetBrains Mono',monospace", color: C.navy, fontWeight: 700, background: C.goldL, borderRadius: 6, padding: '1px 7px' }}>{e.ticketId}</span>
+      <span style={{ color: kindOf(e.kind).color, fontWeight: 700 }}>{kindOf(e.kind).label}</span>
+      {typing && <span>typing...</span>}
+    </div>
+  );
+  const rows = [];
+  let lastDay = '';
+  feed.forEach(e => {
+    const d = dayLabel(e.at);
+    if (d && d !== lastDay) { rows.push({ sep: d, key: `sep:${d}:${e.key}` }); lastDay = d; }
+    rows.push(e);
+  });
+
+  return (
+    <div className="assistant-panel" style={{
+      position: 'fixed', right: 14, bottom: 14, top: 'calc(var(--nav-h, 112px) + 14px)', zIndex: 900, width: 376, maxWidth: 'calc(100vw - 20px)',
+      background: 'rgba(255,255,255,0.94)', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)',
+      border: `1px solid ${C.border2}`, borderRadius: 20, boxShadow: '0 20px 54px rgba(16,24,40,0.2)',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '13px 14px 13px 16px', background: `linear-gradient(100deg,${C.navy2},${C.navy3})`, color: '#fff' }}>
+        <div style={{ position: 'relative' }}>
+          <AssistantAvatar size={38} />
+          <span className="pulse" style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: '#4ade80', border: '2px solid #fff' }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600 }}>Ticket Assistant</div>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.82)' }}>Online &middot; {roleTitle}</div>
+        </div>
+        <button onClick={() => setOpen(false)} aria-label="Minimise assistant" className="nav-btn"
+          style={{ background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.4)', color: '#fff', width: 30, height: 30, borderRadius: '50%', cursor: 'pointer', fontSize: 17, lineHeight: 1 }}>&minus;</button>
+      </div>
+      {activeCount > 1 && (
+        <div style={{ display: 'flex', gap: 6, padding: '9px 12px', overflowX: 'auto', borderBottom: `1px solid ${C.border}`, background: '#fff', flexShrink: 0 }}>
+          {[['', `All (${activeCount})`], ...activeTickets.map(c => [c.id, c.id])].map(([k, label], ci) => (
+            <button key={`${k || 'all'}-${ci}`} onClick={() => setFocus(k)}
+              style={{
+                flexShrink: 0, padding: '4px 11px', borderRadius: 99, fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap',
+                fontFamily: k ? "'JetBrains Mono',monospace" : 'inherit', fontWeight: focus === k ? 700 : 500,
+                border: `1px solid ${focus === k ? C.navy : C.border2}`, background: focus === k ? C.goldL : '#fff', color: focus === k ? C.navy : C.text2
+              }}>{label}</button>
+          ))}
+        </div>
+      )}
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, background: C.off, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {rows.length === 0 && !live && (
+          <div style={{ margin: 'auto', textAlign: 'center', color: C.muted, fontSize: 12.5, padding: 20, lineHeight: 1.7 }}>
+            <AssistantAvatar size={44} />
+            <div style={{ marginTop: 12 }}>No active tickets.<br />Progress on a new complaint appears here automatically.</div>
+          </div>
+        )}
+        {rows.map(e => e.sep ? (
+          <div key={e.key} style={{ alignSelf: 'center', fontSize: 10.5, fontWeight: 600, color: C.muted, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 99, padding: '2px 12px' }}>{e.sep}</div>
+        ) : (
+          <div key={e.key} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', maxWidth: '96%' }}>
+            <AssistantAvatar size={26} />
+            <div style={{ minWidth: 0 }}>
+              {tag(e, false)}
+              <div style={bubble(e.kind)}>{e.text}</div>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 3, marginLeft: 4 }}>{clockLabel(e.at)}</div>
+            </div>
+          </div>
+        ))}
+        {live && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', maxWidth: '96%' }}>
+            <AssistantAvatar size={26} />
+            <div style={{ minWidth: 0 }}>
+              {tag(live, live.phase === 'typing')}
+              <div style={bubble(live.kind)}>
+                {live.phase === 'typing' ? (
+                  <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', height: 18 }}>
+                    {[0, 1, 2].map(n => (
+                      <span key={n} style={{ width: 6, height: 6, borderRadius: '50%', background: C.muted, animation: `typingDot 1.1s ${n * 0.16}s infinite ease-in-out` }} />
+                    ))}
+                  </span>
+                ) : live.text.slice(0, live.shown)}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '10px 14px', borderTop: `1px solid ${C.border}`, background: '#fff', flexShrink: 0 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: C.off, border: `1px solid ${C.border}`,
+          borderRadius: 99, padding: '8px 14px', fontSize: 11.5, color: C.muted
+        }}>
+          <span>Tracking {activeCount} active ticket{activeCount === 1 ? '' : 's'}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: '#16a34a' }} />Live</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── TOASTS (short success / error confirmations) ──────────────
+const toastBus = { listeners: new Set(), push(t) { this.listeners.forEach(l => l(t)); } };
+const toast = {
+  success: (msg, ms = 4000) => toastBus.push({ kind: 'success', msg, ms }),
+  error: (msg, ms = 5000) => toastBus.push({ kind: 'error', msg, ms }),
+};
+
+function ToastHost() {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    const on = (t) => {
+      const id = `${Date.now()}-${Math.random()}`;
+      setItems(list => [...list, { ...t, id }].slice(-3));
+      setTimeout(() => setItems(list => list.filter(x => x.id !== id)), t.ms);
+    };
+    toastBus.listeners.add(on);
+    return () => { toastBus.listeners.delete(on); };
+  }, []);
+  if (items.length === 0) return null;
+  return (
+    <div style={{
+      position: 'fixed', top: 'calc(var(--nav-h, 0px) + 14px)', left: 0, right: 0, zIndex: 1400,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, pointerEvents: 'none', padding: '0 12px'
+    }}>
+      {items.map(t => {
+        const ok = t.kind === 'success';
+        const col = ok ? '#15803d' : '#b42318';
+        return (
+          <div key={t.id} role="status" className="toast-in" style={{
+            display: 'flex', alignItems: 'center', gap: 12, minWidth: 260, maxWidth: 520, padding: '12px 18px 12px 14px',
+            background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+            border: `1px solid ${col}33`, borderRadius: 14, boxShadow: '0 14px 40px rgba(16,24,40,0.18)', pointerEvents: 'auto'
+          }}>
+            <span style={{
+              width: 30, height: 30, borderRadius: '50%', background: `${col}18`, color: col, flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              {ok ? (
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path className="toast-check" d="m5 12.5 4.5 4.5L19 7.5" />
+                </svg>
+              ) : (
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M12 7v6M12 17h.01" /></svg>
+              )}
+            </span>
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text, lineHeight: 1.4 }}>{t.msg}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Password-style input that does not trigger the browser's password manager /
+// "found in a data breach" pop-up (text input masked with CSS where supported).
+const SUPPORTS_TEXT_SECURITY = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('-webkit-text-security', 'disc');
+function SecretInput({ show = false, style, ...rest }) {
+  if (SUPPORTS_TEXT_SECURITY) {
+    return (
+      <input {...rest} type="text" autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+        data-lpignore="true" data-1p-ignore="true" data-form-type="other"
+        style={{ ...style, WebkitTextSecurity: show ? 'none' : 'disc' }} />
+    );
+  }
+  return <input {...rest} type={show ? 'text' : 'password'} autoComplete="new-password" style={style} />;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  AI HELPERS — rule-based automation that runs fully in the browser
+//  (no external service, no API key, nothing leaves the hospital network)
+// ══════════════════════════════════════════════════════════════
+const AI_CATEGORY_RULES = [
+  ['Suvarna', ['suvarna']],
+  ['Network', ['internet', 'wifi', 'wi-fi', 'lan', 'network', 'router', 'switch', 'ethernet', 'ip address', 'connectivity', 'vpn', 'lan cable', 'no connection']],
+  ['Printer', ['printer', 'printing', 'print', 'toner', 'cartridge', 'scanner', 'scan', 'paper jam', 'xerox']],
+  ['IT Hardware', ['computer', 'pc', 'cpu', 'monitor', 'keyboard', 'mouse', 'system', 'laptop', 'ups', 'hdd', 'ram', 'screen', 'display', 'not turning on', 'hang', 'hanging', 'restart']],
+  ['Other Software', ['software', 'app', 'application', 'login', 'password', 'his', 'hms', 'lis', 'pacs', 'email', 'outlook', 'windows', 'error', 'install', 'license', 'server', 'report not', 'page not opening']],
+  ['Electrical', ['electric', 'electrical', 'light', 'tube', 'bulb', 'fan', 'socket', 'switch board', 'mcb', 'short circuit', 'spark', 'wiring', 'power', 'plug', 'voltage', 'tripping']],
+  ['AC', ['ac', 'a.c', 'air conditioner', 'not cooling', 'split ac', 'cooling']],
+  ['Air Cooler', ['air cooler']],
+  ['Water Cooler', ['water cooler']],
+  ['RO', ['ro', 'water purifier', 'purifier']],
+  ['Fridge/Freezer', ['fridge', 'refrigerator', 'freezer', 'deep freezer']],
+  ['Plumber', ['leak', 'leakage', 'tap', 'pipe', 'flush', 'toilet', 'drain', 'water supply', 'basin', 'seepage', 'overflow']],
+  ['Biomedical Equipment', ['ventilator', 'infusion pump', 'syringe pump', 'ecg', 'defibrillator', 'nebuliser', 'nebulizer', 'suction', 'oxygen concentrator', 'biomedical', 'bp apparatus', 'pulse oximeter', 'patient monitor']],
+  ['Furniture Repairing', ['chair', 'table', 'bed', 'cot', 'almirah', 'cupboard', 'drawer', 'locker', 'trolley', 'furniture']],
+  ['Carpenter', ['door', 'window', 'lock', 'hinge', 'wood', 'shelf']],
+  ['Painter', ['paint', 'whitewash', 'putty', 'wall colour', 'wall color']],
+  ['Welding', ['weld', 'grill', 'railing', 'gate']],
+  ['Gas Plant/Cylinder', ['gas', 'cylinder', 'manifold', 'regulator']],
+  ['Mobile/Charger', ['mobile', 'charger', 'phone']],
+];
+const AI_HIGH_WORDS = ['urgent', 'emergency', 'asap', 'immediately', 'icu', 'nicu', 'ot', 'operation theatre', 'operation theater', 'casualty', 'critical', 'dialysis', 'ventilator', 'not working at all', 'completely down', 'dead', 'fire', 'smoke', 'spark', 'short circuit', 'flood', 'overflow'];
+const AI_LOW_WORDS = ['minor', 'whenever', 'when possible', 'no hurry', 'cosmetic', 'suggestion', 'shifting', 'later'];
+
+const aiRegexCache = {};
+const aiHas = (text, word) => {
+  const key = word;
+  if (!aiRegexCache[key]) aiRegexCache[key] = new RegExp(`(^|[^a-z0-9])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`, 'i');
+  return aiRegexCache[key].test(text);
+};
+
+// Reads the complaint text and suggests a category and priority.
+const aiClassify = (text) => {
+  const t = String(text || '').toLowerCase();
+  if (t.trim().length < 8) return null;
+  let best = null;
+  AI_CATEGORY_RULES.forEach(([type, words]) => {
+    if (!COMPLAINT_TYPES.includes(type)) return;
+    const hits = words.filter(w => aiHas(t, w)).length;
+    if (hits > 0 && (!best || hits > best.hits)) best = { type, hits };
+  });
+  const high = AI_HIGH_WORDS.some(w => aiHas(t, w));
+  const low = !high && AI_LOW_WORDS.some(w => aiHas(t, w));
+  const priority = high ? 'high' : low ? 'low' : DEFAULT_PRIORITY;
+  if (!best && priority === DEFAULT_PRIORITY) return null;
+  return { type: best ? best.type : '', priority };
+};
+
+// Picks the technician best placed to take a ticket: fewest open tickets, most
+// similar tickets already resolved.
+const recommendTechnician = (techs, complaints, ticket) => {
+  if (!techs || techs.length === 0) return null;
+  const rows = techs.map(t => {
+    const mine = complaints.filter(c => safeLC(c.assignedTo) === safeLC(t.username));
+    const active = mine.filter(isActiveTicket).length;
+    const similar = mine.filter(c => (c.status === 'closed' || c.status === 'resolved') && typeKey(c.type) === typeKey(ticket.type)).length;
+    return { tech: t, active, similar, score: similar * 1.5 - active * 2 };
+  }).sort((a, b) => b.score - a.score || a.active - b.active);
+  return rows[0];
+};
+
+const DEFAULT_SOLUTIONS = {
+  'Network': ['Replaced the faulty LAN cable', 'Reset the switch port and restored connectivity', 'Corrected the IP configuration'],
+  'IT Hardware': ['Restarted and tested the system', 'Replaced the keyboard / mouse', 'Cleaned and reseated the hardware parts'],
+  'Printer': ['Cleared the paper jam', 'Replaced the toner cartridge', 'Reinstalled the printer driver'],
+  'Electrical': ['Replaced the faulty bulb / tube', 'Repaired the loose wiring', 'Replaced the MCB / switch'],
+  'Plumber': ['Fixed the leakage', 'Cleared the drain blockage', 'Replaced the tap / washer'],
+  'AC': ['Cleaned the filters and checked the gas', 'Replaced the capacitor', 'Reset the unit and tested cooling'],
+};
+const GENERIC_SOLUTIONS = ['Issue fixed on site', 'Faulty part replaced', 'Checked and working normally'];
+
+// Most common past solutions for the same category, then sensible defaults.
+const suggestSolutions = (complaints, ticket) => {
+  const counts = {};
+  complaints.forEach(c => {
+    if (!(c.status === 'closed' || c.status === 'resolved') || typeKey(c.type) !== typeKey(ticket.type)) return;
+    const s = String(c.solution || '').trim();
+    if (s.length < 4 || s.length > 90) return;
+    const k = s.toLowerCase();
+    counts[k] = counts[k] || { text: s, n: 0 };
+    counts[k].n++;
+  });
+  const learned = Object.values(counts).sort((a, b) => b.n - a.n).slice(0, 3).map(x => x.text);
+  const defaults = DEFAULT_SOLUTIONS[typeKey(ticket.type)] || GENERIC_SOLUTIONS;
+  const out = [...learned];
+  defaults.forEach(d => { if (out.length < 5 && !out.some(x => x.toLowerCase() === d.toLowerCase())) out.push(d); });
+  return out;
+};
+
+// Plain-language observations generated from the live ticket data.
+const buildInsights = (rows, techs, nowMs) => {
+  const out = [];
+  const n = rows.length;
+  if (n === 0) return [{ tone: 'info', title: 'Not enough data yet', text: 'Insights appear once tickets are raised.' }];
+  const by = (fn) => { const m = {}; rows.forEach(c => { const k = fn(c) || 'N/A'; m[k] = (m[k] || 0) + 1; }); return Object.entries(m).sort((a, b) => b[1] - a[1]); };
+  const isDoneT = (c) => c.status === 'resolved' || c.status === 'closed';
+
+  const cats = by(c => typeKey(c.type));
+  if (cats[0]) out.push({ tone: 'info', title: 'Most frequent category', text: `${cats[0][0]} makes up ${Math.round((cats[0][1] / n) * 100)}% of tickets (${cats[0][1]} of ${n}). A preventive check on this area can reduce repeat complaints.` });
+  const depts = by(c => c.dept);
+  if (depts[0] && depts[0][1] >= 2) out.push({ tone: 'info', title: 'Busiest location', text: `${depts[0][0]} has raised the most tickets (${depts[0][1]}).` });
+
+  const monthAgo = nowMs - 30 * 86400000;
+  const repeat = {};
+  rows.filter(c => new Date(c.at).getTime() >= monthAgo).forEach(c => { const k = `${typeKey(c.type)}|${c.dept}`; repeat[k] = (repeat[k] || 0) + 1; });
+  const rep = Object.entries(repeat).filter(([, v]) => v >= 3).sort((a, b) => b[1] - a[1])[0];
+  if (rep) { const [type, dept] = rep[0].split('|'); out.push({ tone: 'warn', title: 'Repeated issue', text: `${type} at ${dept} was raised ${rep[1]} times in the last 30 days. A root-cause check is recommended.` }); }
+
+  const active = rows.filter(isActiveTicket);
+  const overdue = active.filter(c => slaState(c, nowMs));
+  if (overdue.length) out.push({ tone: 'warn', title: 'Overdue tickets', text: `${overdue.length} active ticket${overdue.length === 1 ? ' has' : 's have'} had no update past the allowed time (${overdue.slice(0, 3).map(c => c.id).join(', ')}${overdue.length > 3 ? ', ...' : ''}).` });
+  const unassigned = active.filter(c => !c.assignedTo);
+  if (unassigned.length) out.push({ tone: 'warn', title: 'Waiting for allocation', text: `${unassigned.length} active ticket${unassigned.length === 1 ? ' is' : 's are'} not yet assigned to a technician.` });
+
+  if (techs && techs.length > 1) {
+    const load = techs.map(t => ({ name: t.displayName, n: active.filter(c => safeLC(c.assignedTo) === safeLC(t.username)).length })).sort((a, b) => b.n - a.n);
+    if (load[0].n - load[load.length - 1].n >= 3) out.push({ tone: 'warn', title: 'Uneven workload', text: `${load[0].name} has ${load[0].n} active tickets while ${load[load.length - 1].name} has ${load[load.length - 1].n}. Consider rebalancing.` });
+  }
+
+  const doneRows = rows.filter(c => isDoneT(c) && c.actionAt && c.at);
+  if (doneRows.length >= 2) {
+    const m = {};
+    doneRows.forEach(c => { const k = typeKey(c.type); (m[k] = m[k] || []).push(new Date(c.actionAt) - new Date(c.at)); });
+    const slow = Object.entries(m).filter(([, v]) => v.length >= 2).map(([k, v]) => [k, v.reduce((a, b) => a + b, 0) / v.length]).sort((a, b) => b[1] - a[1])[0];
+    const avg = doneRows.reduce((a, c) => a + (new Date(c.actionAt) - new Date(c.at)), 0) / doneRows.length;
+    out.push({ tone: 'good', title: 'Resolution speed', text: `Average resolution time is ${fmtSpan(avg)}.${slow ? ` ${slow[0]} takes the longest (${fmtSpan(slow[1])}).` : ''}` });
+  }
+  if (n >= 5) {
+    const hours = {};
+    rows.forEach(c => { const h = new Date(c.at).getHours(); if (!isNaN(h)) hours[h] = (hours[h] || 0) + 1; });
+    const top = Object.entries(hours).sort((a, b) => b[1] - a[1])[0];
+    if (top) { const h = Number(top[0]); const lab = (x) => `${((x + 11) % 12) + 1} ${x < 12 ? 'AM' : 'PM'}`; out.push({ tone: 'info', title: 'Peak hour', text: `Most tickets are raised between ${lab(h)} and ${lab((h + 1) % 24)}. Keep a technician available in this window.` }); }
+  }
+  const rated = rows.filter(c => c.rating);
+  if (rated.length >= 3) {
+    const poor = rated.filter(c => c.rating === 'poor').length;
+    const happy = rated.filter(c => c.rating === 'excellent' || c.rating === 'very_good' || c.rating === 'good').length;
+    out.push({ tone: poor ? 'warn' : 'good', title: 'Employee satisfaction', text: `${Math.round((happy / rated.length) * 100)}% of rated tickets are Good or better${poor ? `; ${poor} rated Poor need a follow-up` : ''}.` });
+  }
+  return out;
+};
+
+function AiBadge() {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 99, fontSize: 10, fontWeight: 700, letterSpacing: .6,
+      color: C.navy, background: C.goldL, border: `1px solid ${C.border2}`
+    }}>AI</span>
+  );
+}
+
+function AiInsightsPanel({ rows, techs }) {
+  const items = useMemo(() => buildInsights(rows, techs, Date.now()), [rows, techs]);
+  const tone = { info: C.navy, warn: '#b45309', good: '#15803d' };
+  return (
+    <Card style={{ padding: 20, marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <AiBadge />
+        <span style={{ fontWeight: 600, fontSize: 15, color: C.text }}>Insights</span>
+        <span style={{ fontSize: 12, color: C.muted }}>Generated automatically from live ticket data</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 12 }}>
+        {items.map((it, i) => (
+          <div key={i} style={{
+            background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 14px',
+            boxShadow: `inset 3px 0 0 ${tone[it.tone] || C.navy}`
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: tone[it.tone] || C.navy, marginBottom: 4 }}>{it.title}</div>
+            <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.55 }}>{it.text}</div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+// ── Progress stepper (Raised -> Reviewed -> With technician -> Resolved) ──
+function TicketStepper({ c, compact = false }) {
+  if (c.status === 'refused') {
+    return <div style={{ fontSize: 12, fontWeight: 600, color: C.red, background: C.redL, borderRadius: 8, padding: '6px 10px' }}>Refused</div>;
+  }
+  const done = c.status === 'resolved' || c.status === 'closed';
+  const stage = done ? 3 : c.status === 'hold' ? (c.assignedTo ? 2 : 1) : 0;
+  const steps = ['Raised', 'Reviewed', 'With technician', 'Resolved'];
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
+      {steps.map((label, i) => {
+        const reached = i <= stage;
+        const current = i === stage && !done;
+        return (
+          <div key={label} style={{ flex: i === steps.length - 1 ? '0 0 auto' : 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span style={{
+                width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
+                background: reached ? (done ? '#16a34a' : C.navy) : '#fff', border: `2px solid ${reached ? (done ? '#16a34a' : C.navy) : C.border2}`,
+                boxShadow: current ? `0 0 0 4px ${C.navy}22` : 'none'
+              }} />
+              {i < steps.length - 1 && <span style={{ flex: 1, height: 2, background: i < stage ? (done ? '#16a34a' : C.navy) : C.border2, margin: '0 4px', borderRadius: 2 }} />}
+            </div>
+            {!compact && <span style={{ fontSize: 10.5, color: reached ? C.text2 : C.muted, fontWeight: reached ? 600 : 500, marginTop: 5, whiteSpace: 'nowrap' }}>{label}</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Employee feedback: editable for 3 minutes after it is first saved ──
+const FEEDBACK_EDIT_MS = 3 * 60 * 1000;
+
+const feedbackState = (t, nowMs) => {
+  const has = !!t.rating || !!(t.ratingRemark || '').trim();
+  const at = t.ratedAt ? new Date(t.ratedAt).getTime() : 0;
+  const left = at ? Math.max(0, FEEDBACK_EDIT_MS - (nowMs - at)) : 0;
+  return { has, locked: has && left === 0, left };
+};
+
+const fmtClock = (ms) => {
+  const s = Math.ceil(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+function FeedbackPanel({ ticket, onRate, onRemark }) {
+  const nowMs = useNowTick(1000);
+  const [draft, setDraft] = useState(ticket.ratingRemark || '');
+  const docId = ticket._docId;
+  useEffect(() => { setDraft(ticket.ratingRemark || ''); }, [docId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fb = feedbackState(ticket, nowMs);
+  const chip = (r, active, disabled) => ({
+    display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 99, fontSize: 12.5, fontWeight: 600,
+    cursor: disabled ? 'default' : 'pointer', opacity: disabled && !active ? .5 : 1,
+    border: `1.5px solid ${active ? r.color : C.border2}`, background: active ? `${r.color}18` : '#fff', color: active ? r.color : C.text2
+  });
+  return (
+    <SectionCard title={fb.locked ? 'Your feedback' : 'Rate this resolution'}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+        {RATING_OPTIONS.map(r => (
+          <button key={r.key} disabled={fb.locked} onClick={() => onRate(ticket, r.key)} style={chip(r, ticket.rating === r.key, fb.locked)}>{r.label}</button>
+        ))}
+      </div>
+      {fb.locked ? (
+        <>
+          <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.6, marginBottom: 10 }}>
+            <span style={{ color: C.muted }}>Remark: </span>{na(ticket.ratingRemark)}
+          </div>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#15803d', fontWeight: 600, background: '#e6f6ee', borderRadius: 99, padding: '5px 12px' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+            Feedback submitted. It can no longer be edited.
+          </div>
+        </>
+      ) : (
+        <>
+          <FieldLabel>Remark (optional)</FieldLabel>
+          <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={2}
+            placeholder="Add a remark about the resolution" style={{ ...inputStyle, resize: 'vertical' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
+            <Btn onClick={() => onRemark(ticket, draft)} variant="primary" size="sm">Save Feedback</Btn>
+            <span style={{ fontSize: 12, color: C.muted }}>
+              {fb.has ? `You can edit this feedback for ${fmtClock(fb.left)} more.` : 'After saving, you can edit it for 3 minutes.'}
+            </span>
+          </div>
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
+// ── Grid card used by the admin / technician ticket list ───────
+function TicketGridCard({ c, onOpen }) {
+  const active = c.status === 'open' || c.status === 'hold';
+  const sla = slaState(c, Date.now());
+  const st = STATUS_CFG[c.status] || { dot: C.muted };
+  const clamp = { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' };
+  const row = (k, v) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, padding: '3px 0' }}>
+      <span style={{ color: C.muted, flexShrink: 0 }}>{k}</span>
+      <span style={{ color: na(v) === 'N/A' ? C.muted : C.text2, fontWeight: 600, textAlign: 'right', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{na(v)}</span>
+    </div>
+  );
+  return (
+    <div onClick={() => onOpen(c)}
+      style={{
+        background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12,
+        padding: 16, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10,
+        boxShadow: `inset 4px 0 0 ${st.dot}, 0 1px 2px rgba(16,24,40,0.04)`, transition: 'box-shadow .15s, transform .15s'
+      }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = `inset 4px 0 0 ${st.dot}, 0 6px 18px rgba(16,24,40,0.10)`; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = `inset 4px 0 0 ${st.dot}, 0 1px 2px rgba(16,24,40,0.04)`; e.currentTarget.style.transform = 'none'; }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{
+          fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: C.navy, fontWeight: 700,
+          background: C.goldL, padding: '3px 9px', borderRadius: 6, letterSpacing: .4
+        }}>{c.id}</span>
+        <PriorityBadge priority={c.priority} />
+      </div>
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{typeKey(c.type)}</div>
+        <div style={{ fontSize: 12.5, color: C.muted, marginTop: 2 }}>{na(c.dept)}</div>
+      </div>
+      <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.5, minHeight: 39, wordBreak: 'break-word', ...clamp }}>{na(c.desc)}</div>
+      <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+        {row('Employee', c.userName)}
+        {row('Technician', c.assignedToName || (active ? 'Not assigned' : ''))}
+        {row('Raised', c.at ? fmtDT(c.at) : '')}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <Badge status={c.status} />
+          {sla && <span style={{ fontSize: 11, fontWeight: 600, color: '#b45309' }}>Overdue {fmtSpan(sla.idle)}</span>}
+        </div>
+        <span style={{ fontSize: 12, fontWeight: 600, color: C.navy }}>View details</span>
+      </div>
+    </div>
+  );
+}
+
+// ── EXCEL REPORTS (styled: borders, theme header, status colours, N/A) ──
+const xlHex = (c) => String(c || '#000000').replace('#', '').toUpperCase();
+const XL_LINE = { style: 'thin', color: { rgb: 'C9D3CF' } };
+const XL_BORDER = { top: XL_LINE, bottom: XL_LINE, left: XL_LINE, right: XL_LINE };
+const xlStyle = (o = {}) => ({
+  font: { name: 'Calibri', sz: o.sz || 11, bold: !!o.bold, color: { rgb: o.color || '1F2937' } },
+  fill: o.fill ? { patternType: 'solid', fgColor: { rgb: o.fill } } : { patternType: 'none' },
+  alignment: { horizontal: o.h || 'left', vertical: o.v || 'center', wrapText: o.wrap !== false },
+  border: o.noBorder ? {} : XL_BORDER
+});
+const XL_STATUS = {
+  open: { color: '1D4ED8', fill: 'DBEAFE' },
+  hold: { color: '9A5B0B', fill: 'FEF3C7' },
+  resolved: { color: '0F6B46', fill: 'D1FAE5' },
+  closed: { color: '0F6B46', fill: 'D1FAE5' },
+  refused: { color: 'B42318', fill: 'FEE2E2' },
+};
+const XL_PRIORITY = { high: { color: 'B42318', fill: 'FEE2E2' }, medium: { color: '9A5B0B', fill: 'FEF3C7' }, low: { color: '0F6B46', fill: 'D1FAE5' } };
+const xlTick = (d) => (d || new Date()).toISOString().slice(0, 10);
+
+const xlTheme = () => {
+  const mix = (hex, pct) => { // lighten towards white
+    const n = parseInt(hex, 16);
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    const f = (v) => Math.round(v + (255 - v) * pct).toString(16).padStart(2, '0');
+    return (f(r) + f(g) + f(b)).toUpperCase();
+  };
+  const p = xlHex(C.navy);
+  return { primary: p, dark: xlHex(C.navy2), tint: mix(p, 0.9), tint2: mix(p, 0.82) };
+};
+
+const xlPut = (ws, r, c, v, s) => {
+  const ref = XLSX.utils.encode_cell({ r, c });
+  const isNum = typeof v === 'number' && isFinite(v);
+  ws[ref] = { v: isNum ? v : (v == null ? '' : String(v)), t: isNum ? 'n' : 's', s };
+};
+const xlRange = (ws, rows, cols) => { ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows - 1, c: cols - 1 } }); };
+
+function buildTicketReport(rows, meta) {
+  const th = xlTheme();
+  const wb = XLSX.utils.book_new();
+  const isDone = (c) => c.status === 'resolved' || c.status === 'closed';
+  const label = (c) => STATUS_CFG[c.status]?.label || c.status;
+  const total = rows.length;
+  const cnt = (f) => rows.filter(f).length;
+  const open = cnt(c => c.status === 'open'), hold = cnt(c => c.status === 'hold');
+  const done = cnt(isDone), refused = cnt(c => c.status === 'refused');
+  const activeRows = rows.filter(isActiveTicket);
+  const resolvedRows = rows.filter(c => isDone(c) && c.actionAt && c.at);
+  const avgMs = resolvedRows.length ? resolvedRows.reduce((a, c) => a + (new Date(c.actionAt) - new Date(c.at)), 0) / resolvedRows.length : 0;
+  const rate = total ? Math.round((done / total) * 100) : 0;
+  const nowMs = Date.now();
+  const overdue = activeRows.filter(c => slaState(c, nowMs)).length;
+  const highActive = activeRows.filter(c => c.priority === 'high').length;
+  const unassigned = activeRows.filter(c => !c.assignedTo).length;
+
+  // ───── Sheet 1: Dashboard
+  const ws = {};
+  const COLS = 8;
+  let r = 0;
+  const merges = [];
+  const fillRow = (rowIdx, s) => { for (let c = 0; c < COLS; c++) xlPut(ws, rowIdx, c, '', s); };
+  fillRow(r, xlStyle({ fill: th.primary, noBorder: true }));
+  xlPut(ws, r, 0, 'Choithram Hospital & Research Centre', xlStyle({ fill: th.primary, color: 'FFFFFF', bold: true, sz: 18, noBorder: true, wrap: false }));
+  merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } }); r++;
+  fillRow(r, xlStyle({ fill: th.dark, noBorder: true }));
+  xlPut(ws, r, 0, 'IDAR Ticket Report - Performance Dashboard', xlStyle({ fill: th.dark, color: 'FFFFFF', sz: 12, noBorder: true, wrap: false }));
+  merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } }); r++;
+  const metaStyle = xlStyle({ fill: th.tint, color: '374151', sz: 10, noBorder: true, wrap: false });
+  [`Generated: ${fmtDT(new Date().toISOString())}`, `Scope: ${meta.scope}`, `Filters: ${meta.filters}`].forEach(t => {
+    fillRow(r, metaStyle); xlPut(ws, r, 0, t, metaStyle); merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } }); r++;
+  });
+  r++;
+
+  const kpi = (row, col, labelTxt, value, note, color, fill) => {
+    xlPut(ws, row, col, labelTxt, xlStyle({ fill, color, bold: true, sz: 10, h: 'center' }));
+    xlPut(ws, row + 1, col, value, xlStyle({ fill, color, bold: true, sz: 22, h: 'center' }));
+    xlPut(ws, row + 2, col, note, xlStyle({ fill, color: '6B7280', sz: 9, h: 'center' }));
+  };
+  const k1 = [
+    ['TOTAL TICKETS', total, 'In this report', th.primary, th.tint2],
+    ['OPEN', open, 'Awaiting action', '1D4ED8', 'DBEAFE'],
+    ['PROCESSING', hold, 'Work in progress', '9A5B0B', 'FEF3C7'],
+    ['RESOLVED / CLOSED', done, 'Completed', '0F6B46', 'D1FAE5'],
+    ['REFUSED', refused, 'Not taken forward', 'B42318', 'FEE2E2'],
+    ['RESOLUTION RATE', `${rate}%`, 'Resolved of total', rate >= 80 ? '0F6B46' : rate >= 50 ? '9A5B0B' : 'B42318', rate >= 80 ? 'D1FAE5' : rate >= 50 ? 'FEF3C7' : 'FEE2E2'],
+    ['AVG RESOLUTION TIME', resolvedRows.length ? fmtSpan(avgMs) : 'N/A', 'Raised to resolved', th.primary, th.tint2],
+    ['ACTIVE TICKETS', activeRows.length, 'Open + Processing', th.primary, th.tint2],
+  ];
+  k1.forEach((k, i) => kpi(r, i, ...k));
+  r += 3;
+  for (let c = 0; c < COLS; c++) xlPut(ws, r, c, '', xlStyle({ noBorder: true }));
+  r++;
+  const k2 = [
+    ['HIGH PRIORITY ACTIVE', highActive, 'Needs attention', highActive ? 'B42318' : '0F6B46', highActive ? 'FEE2E2' : 'D1FAE5'],
+    ['NOT ASSIGNED', unassigned, 'Active, no technician', unassigned ? '9A5B0B' : '0F6B46', unassigned ? 'FEF3C7' : 'D1FAE5'],
+    ['OVERDUE (NO UPDATE)', overdue, 'Past SLA limit', overdue ? 'B42318' : '0F6B46', overdue ? 'FEE2E2' : 'D1FAE5'],
+  ];
+  k2.forEach((k, i) => kpi(r, i, ...k));
+  r += 3;
+  r++;
+
+  const table = (title, headers, body, opts = {}) => {
+    fillRow(r, xlStyle({ fill: th.tint2, noBorder: true }));
+    xlPut(ws, r, 0, title, xlStyle({ fill: th.tint2, color: th.primary, bold: true, sz: 12, noBorder: true, wrap: false }));
+    merges.push({ s: { r, c: 0 }, e: { r, c: COLS - 1 } }); r++;
+    headers.forEach((h, i) => xlPut(ws, r, i, h, xlStyle({ fill: th.primary, color: 'FFFFFF', bold: true, h: i === 0 ? 'left' : 'center' })));
+    r++;
+    if (body.length === 0) {
+      xlPut(ws, r, 0, 'N/A', xlStyle({ color: '6B7280' }));
+      for (let i = 1; i < headers.length; i++) xlPut(ws, r, i, 'N/A', xlStyle({ color: '6B7280', h: 'center' }));
+      r++;
+    }
+    body.forEach((row, ri) => {
+      const zebra = ri % 2 === 1 ? 'F6F8F7' : 'FFFFFF';
+      row.forEach((v, i) => {
+        let st = xlStyle({ fill: zebra, h: i === 0 ? 'left' : 'center', bold: i === 0 });
+        if (opts.rateCol === i && typeof v === 'number') {
+          const good = v >= 80, mid = v >= 50;
+          st = xlStyle({ fill: good ? 'D1FAE5' : mid ? 'FEF3C7' : 'FEE2E2', color: good ? '0F6B46' : mid ? '9A5B0B' : 'B42318', bold: true, h: 'center' });
+          v = `${v}%`;
+        }
+        xlPut(ws, r, i, v === '' || v == null ? 'N/A' : v, st);
+      });
+      r++;
+    });
+    for (let c = 0; c < COLS; c++) xlPut(ws, r, c, '', xlStyle({ noBorder: true }));
+    r++;
+  };
+  const group = (keyFn) => {
+    const m = {};
+    rows.forEach(c => { const k = keyFn(c) || 'N/A'; (m[k] = m[k] || []).push(c); });
+    return Object.entries(m).map(([k, list]) => {
+      const d = list.filter(isDone).length;
+      return [k, list.length, list.filter(c => c.status === 'open').length, list.filter(c => c.status === 'hold').length, d,
+        list.filter(c => c.status === 'refused').length, Math.round((d / list.length) * 100)];
+    }).sort((a, b) => b[1] - a[1]);
+  };
+  const GH = ['', 'Total', 'Open', 'Processing', 'Resolved / Closed', 'Refused', 'Resolution %'];
+  table('Tickets by Category', ['Category', ...GH.slice(1)], group(c => typeKey(c.type)), { rateCol: 6 });
+  table('Tickets by Department / Location (Top 15)', ['Department / Location', ...GH.slice(1)], group(c => c.dept).slice(0, 15), { rateCol: 6 });
+  table('Tickets by Priority', ['Priority', ...GH.slice(1)],
+    ['high', 'medium', 'low'].map(p => {
+      const list = rows.filter(c => (c.priority || DEFAULT_PRIORITY) === p);
+      const d = list.filter(isDone).length;
+      return [PRIORITY_CFG[p].label, list.length, list.filter(c => c.status === 'open').length, list.filter(c => c.status === 'hold').length, d,
+        list.filter(c => c.status === 'refused').length, list.length ? Math.round((d / list.length) * 100) : 0];
+    }), { rateCol: 6 });
+  const techMap = {};
+  rows.filter(c => c.assignedToName).forEach(c => { (techMap[c.assignedToName] = techMap[c.assignedToName] || []).push(c); });
+  table('Technician Performance', ['Technician', 'Assigned', 'Active', 'Resolved', 'Avg Resolution Time', 'Resolution %', '', ''],
+    Object.entries(techMap).map(([name, list]) => {
+      const d = list.filter(c => isDone(c) && c.actionAt);
+      const avg = d.length ? fmtSpan(d.reduce((a, c) => a + (new Date(c.actionAt) - new Date(c.at)), 0) / d.length) : 'N/A';
+      return [name, list.length, list.filter(isActiveTicket).length, list.filter(isDone).length, avg, Math.round((list.filter(isDone).length / list.length) * 100), '', ''];
+    }).sort((a, b) => b[1] - a[1]), { rateCol: 5 });
+
+  ws['!merges'] = merges;
+  ws['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 19 }, { wch: 15 }, { wch: 19 }, { wch: 17 }];
+  ws['!rows'] = [{ hpt: 30 }];
+  xlRange(ws, r, COLS);
+  XLSX.utils.book_append_sheet(wb, ws, 'Dashboard');
+
+  // ───── Sheet 2: Ticket register
+  const ts = {};
+  const H = ['Sr', 'Ticket ID', 'Priority', 'Status', 'Category', 'Department / Location', 'Employee Name', 'Employee ID', 'Description',
+    'Raised On', 'Assigned Technician', 'Allocated On', 'Resolved By', 'Resolved On', 'Time Taken', 'Action Taken', 'Latest Update', 'Refusal Reason', 'Rating', 'Employee Remark'];
+  H.forEach((h, i) => xlPut(ts, 0, i, h, xlStyle({ fill: th.primary, color: 'FFFFFF', bold: true, h: 'center' })));
+  const ratingLabel = (k) => (RATING_OPTIONS.find(x => x.key === k) || {}).label || '';
+  rows.forEach((c, i) => {
+    const zebra = i % 2 === 1 ? 'F6F8F7' : 'FFFFFF';
+    const n = (v) => (v === undefined || v === null || String(v).trim() === '' ? 'N/A' : v);
+    const finished = isDone(c);
+    const vals = [
+      i + 1, c.id, (PRIORITY_CFG[c.priority] || PRIORITY_CFG[DEFAULT_PRIORITY]).label, label(c), typeKey(c.type), c.dept, c.userName, c.empId, c.desc,
+      c.at ? fmtDT(c.at) : '', c.assignedToName, c.assignedAt ? fmtDT(c.assignedAt) : '', finished ? c.actionBy : '',
+      finished && c.actionAt ? fmtDT(c.actionAt) : '', finished && c.actionAt ? getDuration(c.at, c.actionAt) : '', c.solution,
+      c.status === 'hold' && c.holdReason && !/^Allocated/.test(c.holdReason) ? c.holdReason : '', c.refuseReason, ratingLabel(c.rating), c.ratingRemark
+    ];
+    vals.forEach((v, ci) => {
+      let st = xlStyle({ fill: zebra, h: [0, 1, 2, 3, 7, 9, 11, 13, 14, 18].includes(ci) ? 'center' : 'left', v: 'top', bold: ci === 1 });
+      if (ci === 2) { const p = XL_PRIORITY[c.priority] || XL_PRIORITY.medium; st = xlStyle({ fill: p.fill, color: p.color, bold: true, h: 'center', v: 'top' }); }
+      if (ci === 3) { const p = XL_STATUS[c.status] || XL_STATUS.open; st = xlStyle({ fill: p.fill, color: p.color, bold: true, h: 'center', v: 'top' }); }
+      xlPut(ts, i + 1, ci, ci === 0 ? v : n(v), st);
+    });
+  });
+  if (rows.length === 0) H.forEach((h, i) => xlPut(ts, 1, i, i === 0 ? 1 : 'N/A', xlStyle({ color: '6B7280', h: 'center' })));
+  ts['!cols'] = [{ wch: 6 }, { wch: 13 }, { wch: 10 }, { wch: 13 }, { wch: 18 }, { wch: 26 }, { wch: 20 }, { wch: 12 }, { wch: 46 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 13 }, { wch: 36 }, { wch: 28 }, { wch: 24 }, { wch: 12 }, { wch: 28 }];
+  ts['!rows'] = [{ hpt: 26 }];
+  const lastRow = Math.max(rows.length, 1);
+  xlRange(ts, lastRow + 1, H.length);
+  ts['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: lastRow, c: H.length - 1 } }) };
+  XLSX.utils.book_append_sheet(wb, ts, 'Ticket Register');
+  return wb;
+}
+
+function buildLogReport(rows) {
+  const th = xlTheme();
+  const wb = XLSX.utils.book_new();
+  const ws = {};
+  const H = ['Sr', 'Time', 'Type', 'Action', 'By (Name)', 'By (Username)', 'Ticket', 'Target', 'Details'];
+  H.forEach((h, i) => xlPut(ws, 0, i, h, xlStyle({ fill: th.primary, color: 'FFFFFF', bold: true, h: 'center' })));
+  const n = (v) => (v === undefined || v === null || String(v).trim() === '' ? 'N/A' : v);
+  rows.forEach((l, i) => {
+    const zebra = i % 2 === 1 ? 'F6F8F7' : 'FFFFFF';
+    const vals = [i + 1, fmtDT(l.at), LOG_TYPES[l.type]?.label || l.type, l.action, l.actorName, l.actor, l.ticketId, l.target, l.details];
+    vals.forEach((v, ci) => xlPut(ws, i + 1, ci, ci === 0 ? v : n(v), xlStyle({ fill: zebra, h: [0, 1, 2, 6].includes(ci) ? 'center' : 'left', v: 'top', bold: ci === 3 })));
+  });
+  if (rows.length === 0) H.forEach((h, i) => xlPut(ws, 1, i, i === 0 ? 1 : 'N/A', xlStyle({ color: '6B7280', h: 'center' })));
+  ws['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 18 }, { wch: 28 }, { wch: 22 }, { wch: 18 }, { wch: 13 }, { wch: 20 }, { wch: 60 }];
+  ws['!rows'] = [{ hpt: 26 }];
+  const lastRow = Math.max(rows.length, 1);
+  xlRange(ws, lastRow + 1, H.length);
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: lastRow, c: H.length - 1 } }) };
+  XLSX.utils.book_append_sheet(wb, ws, 'Activity Logs');
+  return wb;
+}
 
 // ══════════════════════════════════════════════════════════════
 //  LOGIN PAGE
@@ -976,6 +2392,7 @@ function LoginPage({ onLogin }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [initDone, setInitDone] = useState(false);
+  useEffect(() => { document.documentElement.style.setProperty('--nav-h', '0px'); }, []);
 
   const [fpUsername, setFpUsername] = useState('');
   const [fpNew1, setFpNew1] = useState('');
@@ -1004,13 +2421,14 @@ function LoginPage({ onLogin }) {
       const users = await FireDB.getUsers();
       if (!users) { setError('Cannot connect to database. Check Firebase setup.'); setLoading(false); return; }
       const u = users.find(u => safeLC(u.username) === safeLC(username.trim()));
-      if (!u) { setError('Username not found'); setLoading(false); return; }
-      if (u.password !== password) { setError('Incorrect password'); setLoading(false); return; }
+      if (!u) { Logger.log('auth', 'LOGIN_FAILED', { username: username.trim() }, { details: 'Username not found' }); setError('Username not found'); setLoading(false); return; }
+      if (u.password !== password) { Logger.log('auth', 'LOGIN_FAILED', u, { details: 'Incorrect password' }); setError('Incorrect password'); setLoading(false); return; }
       // Single-session enforcement: this login becomes the only valid session
       // for this account — any other tab/device logged in as this user will
       // be signed out automatically as soon as it sees the new session id.
       const sid = genSessionId();
       await FireDB.updateUser(u.username, { activeSessionId: sid });
+      Logger.log('auth', 'LOGIN', u, { details: roleSummaryLabel(deriveUserPerms(u)) });
       onLogin({ ...u, activeSessionId: sid, _sessionId: sid });
     } catch (e) {
       setError('Login failed. Please try again.');
@@ -1032,6 +2450,7 @@ function LoginPage({ onLogin }) {
       const u = users.find(u => safeLC(u.username) === safeLC(fpUsername.trim()));
       if (!u) { setFpError('Username not found. Please check and try again.'); setFpLoading(false); return; }
       await FireDB.updateUser(u.username, { password: fpNew1, firstLogin: false });
+      Logger.log('auth', 'PASSWORD_RESET_SELF_SERVICE', u, { details: 'Password changed from the Forgot Password screen' });
       setFpSuccess('Password changed successfully! You can now login.');
       setFpUsername(''); setFpNew1(''); setFpNew2('');
     } catch (e) {
@@ -1041,8 +2460,9 @@ function LoginPage({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', background: '#eef1f8', position: 'relative' }}>
-      <style>{GS}</style>
+    <div style={{ minHeight: '100vh', display: 'flex', background: `linear-gradient(135deg,${C.off},${C.goldL})`, position: 'relative' }}>
+      <style>{buildGS()}</style>
+      <div style={{ position: 'absolute', top: 16, right: 18, zIndex: 20 }}><ThemeMenu light /></div>
 
       {/* ── LEFT — brand / slider panel ── */}
       <div className="login-left" style={{
@@ -1061,7 +2481,7 @@ function LoginPage({ onLogin }) {
 
         <div style={{ display: 'flex', justifyContent: 'center', width: '100%', position: 'relative' }}>
           <div style={{
-            fontSize: 30, fontWeight: 900, color: '#0b4f43', letterSpacing: -0.5,
+            fontSize: 30, fontWeight: 900, color: C.navy, letterSpacing: -0.5,
             textAlign: 'center', margin: '0 0 4px 0', position: 'relative'
           }}>
             Choithram Hospital &amp; Research Centre
@@ -1079,7 +2499,7 @@ function LoginPage({ onLogin }) {
       <div className="login-right" style={{
         flex: '1 1 42%', minWidth: 340, display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: '24px 20px', background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(6px)',
-        borderLeft: '1px solid rgba(11,79,67,0.08)'
+        borderLeft: `1px solid ${C.border}`
       }}>
         <div className="fadeUp" style={{ width: '100%', maxWidth: 380 }}>
           <div style={{ textAlign: 'center', marginBottom: 22 }}>
@@ -1100,7 +2520,7 @@ function LoginPage({ onLogin }) {
               <div style={{ marginBottom: 8 }}>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: C.text2, marginBottom: 6 }}>Password</label>
                 <div style={{ position: 'relative' }}>
-                  <input type={showPw ? 'text' : 'password'} value={password}
+                  <SecretInput show={showPw} value={password}
                     onChange={e => setPassword(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleLogin()}
                     style={{ ...inputStyle, background: '#fff', border: `1.5px solid ${C.border2}`, paddingRight: 52 }} />
@@ -1160,12 +2580,12 @@ function LoginPage({ onLogin }) {
               </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: C.text2, marginBottom: 6 }}>New Password</label>
-                <input type="password" value={fpNew1} onChange={e => setFpNew1(e.target.value)}
+                <SecretInput value={fpNew1} onChange={e => setFpNew1(e.target.value)}
                   placeholder="Minimum 3 characters" style={{ ...inputStyle, background: '#fff', border: `1.5px solid ${C.border2}` }} />
               </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: C.text2, marginBottom: 6 }}>Confirm New Password</label>
-                <input type="password" value={fpNew2} onChange={e => setFpNew2(e.target.value)}
+                <SecretInput value={fpNew2} onChange={e => setFpNew2(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleForgotPassword()}
                   style={{ ...inputStyle, background: '#fff', border: `1.5px solid ${C.border2}` }} />
               </div>
@@ -1217,6 +2637,7 @@ function ChangePasswordPage({ user, onDone, onLogout }) {
     if (form.new1 === DEFAULT_PASSWORD) { setError('Please choose a different password'); return; }
     setError(''); setLoading(true);
     await FireDB.updateUser(user.username, { password: form.new1, firstLogin: false });
+    Logger.log('auth', 'PASSWORD_CHANGED', user, { details: 'First-login password set' });
     onDone({ ...user, password: form.new1, firstLogin: false });
     setLoading(false);
   };
@@ -1226,7 +2647,7 @@ function ChangePasswordPage({ user, onDone, onLogout }) {
       minHeight: '100vh', background: `linear-gradient(180deg,#ffffff 0%,${C.off} 100%)`,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
     }}>
-      <style>{GS}</style>
+      <style>{buildGS()}</style>
       <div className="fadeUp" style={{ width: '100%', maxWidth: 400 }}>
         <div style={{ textAlign: 'center', marginBottom: 22 }}>
           <div style={{
@@ -1244,12 +2665,12 @@ function ChangePasswordPage({ user, onDone, onLogout }) {
         <div style={{ background: '#fff', borderRadius: 18, padding: 26, boxShadow: `0 16px 44px ${C.navy}14`, border: `1px solid ${C.border}` }}>
           <div style={{ marginBottom: 16 }}>
             <FieldLabel>New Password</FieldLabel>
-            <input type="password" value={form.new1} onChange={e => f('new1', e.target.value)}
+            <SecretInput value={form.new1} onChange={e => f('new1', e.target.value)}
               placeholder="Minimum 3 characters" style={inputStyle} />
           </div>
           <div style={{ marginBottom: 16 }}>
             <FieldLabel>Confirm Password</FieldLabel>
-            <input type="password" value={form.new2} onChange={e => f('new2', e.target.value)}
+            <SecretInput value={form.new2} onChange={e => f('new2', e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handle()}
               placeholder="Re-enter your password" style={inputStyle} />
           </div>
@@ -1277,34 +2698,28 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
   const [tab, setTab] = useState('form');
   const [form, setForm] = useState({ empId: '', dept: '', type: '', priority: DEFAULT_PRIORITY, desc: '' });
   const [submitting, setSubmitting] = useState(false);
-  const [lastTicket, setLastTicket] = useState(null);
   const [myComplaints, setMyComplaints] = useState([]);
   const [selected, setSelected] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [histFilters, setHistFilters] = useState({ from: '', to: '', status: '', search: '' });
   const [histVisibleCount, setHistVisibleCount] = useState(30);
   const sf = (k, v) => setForm(s => ({ ...s, [k]: v }));
+  const aiHint = useMemo(() => aiClassify(form.desc), [form.desc]);
   const hf = (k, v) => { setHistFilters(s => ({ ...s, [k]: v })); setHistVisibleCount(30); };
 
-  const [ratingRemarkDraft, setRatingRemarkDraft] = useState('');
-  const [remarkSaved, setRemarkSaved] = useState(false);
-
+  // Feedback can be changed for 3 minutes after it is first saved, then it is locked.
   const rateTicket = async (c, key) => {
-    await FireDB.updateComplaint(c._docId, { rating: key });
-    if (selected && selected._docId === c._docId) setSelected(s => ({ ...s, rating: key }));
+    if (feedbackState(c, Date.now()).locked) return;
+    await FireDB.updateComplaint(c._docId, { rating: key, ratedAt: c.ratedAt || now() });
+    Logger.log('ticket', 'TICKET_RATED', user, { ticketId: c.id, target: c.assignedTo || '', details: `Rating: ${key}` });
+    toast.success('Feedback saved successfully');
   };
 
-  const saveRatingRemark = async (c) => {
-    await FireDB.updateComplaint(c._docId, { ratingRemark: ratingRemarkDraft.trim() });
-    if (selected && selected._docId === c._docId) setSelected(s => ({ ...s, ratingRemark: ratingRemarkDraft.trim() }));
-    setRemarkSaved(true);
-    setTimeout(() => setRemarkSaved(false), 2000);
+  const saveRatingRemark = async (c, text) => {
+    if (feedbackState(c, Date.now()).locked) return;
+    await FireDB.updateComplaint(c._docId, { ratingRemark: String(text || '').trim(), ratedAt: c.ratedAt || now() });
+    toast.success('Feedback saved successfully');
   };
-
-  useEffect(() => {
-    setRatingRemarkDraft(selected ? (selected.ratingRemark || '') : '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected && selected._docId]);
 
   useEffect(() => {
     const unsub1 = FireDB.subscribeComplaints(all => {
@@ -1321,7 +2736,7 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
 
   const submit = async () => {
     if (!form.dept || !form.type || !form.desc.trim()) {
-      alert('Please fill all required fields'); return;
+      toast.error('Please fill all required fields'); return;
     }
     setSubmitting(true);
     const seq = await FireDB.getNextSeq();
@@ -1343,8 +2758,9 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
       actionBy: '', solution: '', actionAt: '', holdReason: '', refuseReason: '', rating: '', ratingRemark: ''
     };
     await FireDB.addComplaint(ticket);
+    Logger.log('ticket', 'TICKET_CREATED', user, { ticketId: ticket.id, details: `${ticket.type} | ${ticket.dept} | ${ticket.priority}` });
     await sendWhatsAppAlert(ticket);
-    setLastTicket(ticket);
+    toast.success(`Ticket ${ticket.id} submitted successfully`);
     setForm({ empId: '', dept: '', type: '', priority: DEFAULT_PRIORITY, desc: '' });
     setSubmitting(false);
     setTab('status');
@@ -1353,7 +2769,8 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
   const sortedComplaints = useMemo(() =>
     [...myComplaints].sort((a, b) => new Date(b.at) - new Date(a.at)),
     [myComplaints]);
-  const recentComplaints = sortedComplaints.slice(0, 5);
+  const recentComplaints = sortedComplaints.slice(0, 4);
+  const liveSelected = selected ? (myComplaints.find(c => c._docId === selected._docId) || selected) : null;
 
   const historyFiltered = useMemo(() => sortedComplaints.filter(c => {
     if (histFilters.status && c.status !== histFilters.status) return false;
@@ -1375,61 +2792,52 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
 
   const getStatusMessage = (c) => {
     switch (c.status) {
-      case 'open': return { msg: 'Your ticket has been received. Our team will respond soon.', color: C.blue, bg: C.blueL };
-      case 'hold': return { msg: `Processing: ${c.holdReason || 'Being reviewed by the concerned team.'}`, color: C.yellow, bg: C.yellowL };
-      case 'resolved': return { msg: `Resolved by ${c.actionBy || 'IT Team'}. Solution: ${c.solution || '—'}`, color: C.green, bg: C.greenL };
-      case 'refused': return { msg: `Refused. Reason: ${c.refuseReason || '—'}`, color: C.red, bg: C.redL };
+      case 'open': return { msg: 'Ticket registered. Awaiting review and allocation.', color: C.blue };
+      case 'hold': return c.assignedToName
+        ? { msg: `Assigned to ${c.assignedToName}. ${c.holdReason && !/^Allocated/.test(c.holdReason) ? c.holdReason : 'Work in progress.'}`, color: C.yellow }
+        : { msg: `Under review.${c.holdReason ? ` ${c.holdReason}` : ''}`, color: C.yellow };
+      case 'resolved': return { msg: `Resolved by ${c.actionBy || 'IT team'}. Solution: ${c.solution || '-'}`, color: C.green };
+      case 'refused': return { msg: `Refused. Reason: ${c.refuseReason || '-'}`, color: C.red };
       case 'closed': return c.solution
-        ? { msg: `Resolved & closed by ${c.actionBy || 'IT Team'}. Solution: ${c.solution}`, color: C.green, bg: C.greenL }
-        : { msg: 'This ticket has been closed.', color: C.muted, bg: C.off };
+        ? { msg: `Resolved by ${c.actionBy || 'IT team'}. Solution: ${c.solution}`, color: C.green }
+        : { msg: 'Ticket closed.', color: C.muted };
       default: return null;
     }
   };
 
-  const renderTicketCard = (c) => {
+  const renderTicketCard = (c, onOpen) => {
     const statusMsg = getStatusMessage(c);
+    const desc = c.desc || '';
     return (
-      <Card key={c._docId || c.id} style={{ padding: 22, cursor: 'pointer', transition: 'all .2s' }}
-        onClick={() => setSelected(c)}
-        onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 6px 24px #0b2a2218'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-        onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 2px 12px #0b2a2210'; e.currentTarget.style.transform = 'none'; }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-          <div>
-            <div style={{
-              fontFamily: "'JetBrains Mono',monospace", fontSize: 12,
-              color: C.navy, fontWeight: 700, marginBottom: 4, letterSpacing: 1,
-              background: C.goldL, padding: '3px 10px', borderRadius: 6,
-              border: `1px solid ${C.gold}`, display: 'inline-block'
-            }}>{c.id}</div>
-            <div style={{ fontWeight: 700, fontSize: 17, color: C.text, marginTop: 6, fontFamily: "'Poppins',sans-serif" }}>
-              {c.type}
+      <Card key={c._docId || c.id} className="hover-lift" onClick={() => (onOpen ? onOpen(c) : setSelected(c))}
+        style={{ padding: 16, cursor: 'pointer' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: C.navy, fontWeight: 600 }}>{c.id}</span>
+              <span style={{ fontWeight: 600, fontSize: 15, color: C.text }}>{typeKey(c.type)}</span>
             </div>
-            <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>
-              {c.dept} &nbsp;·&nbsp; {fmtDT(c.at)}
-            </div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{c.dept} &middot; {fmtDT(c.at)}</div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <PriorityBadge priority={c.priority} />
             <Badge status={c.status} />
-            <PriorityBadge priority={c.priority} unresolved={c.status === 'open' || c.status === 'hold'} />
           </div>
         </div>
-        <div style={{
-          background: C.off, borderRadius: 10, padding: '10px 14px',
-          fontSize: 13, color: C.text2, lineHeight: 1.6, border: `1px solid ${C.border}`, marginBottom: 10
-        }}>
-          {c.desc.length > 120 ? c.desc.substring(0, 120) + '…' : c.desc}
+        <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.55, wordBreak: 'break-word' }}>
+          {desc.length > 140 ? desc.substring(0, 140) + '...' : desc}
         </div>
+        <div style={{ marginTop: 14 }}><TicketStepper c={c} compact /></div>
         {statusMsg && (
           <div style={{
-            padding: '10px 14px', background: statusMsg.bg, borderRadius: 10,
-            fontSize: 13, color: statusMsg.color, fontWeight: 500,
-            border: `1px solid ${statusMsg.color}22`
+            marginTop: 10, padding: '8px 12px', background: C.off, borderLeft: `3px solid ${statusMsg.color}`,
+            borderRadius: 6, fontSize: 12.5, color: C.text2, lineHeight: 1.5, wordBreak: 'break-word'
           }}>
             {statusMsg.msg}
-            {c.actionBy && c.status !== 'open' && (
-              <span style={{ display: 'block', fontSize: 11, marginTop: 4, opacity: .8 }}>
-                Action by: <strong>{c.actionBy}</strong>
-              </span>
+            {c.assignedToName && (
+              <div style={{ fontSize: 11.5, color: C.muted, marginTop: 4 }}>
+                Technician: <strong style={{ color: C.text2 }}>{c.assignedToName}</strong>
+              </div>
             )}
           </div>
         )}
@@ -1439,7 +2847,7 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
 
   return (
     <div style={{ minHeight: '100vh', background: C.off }}>
-      <style>{GS}</style>
+      <style>{buildGS()}</style>
       <TopBar
         subtitle="Employee Portal — Complaint & Request System"
         roleLabel="Employee"
@@ -1457,46 +2865,20 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
         ) : null}
       />
 
-      <div style={{ maxWidth: 1300, margin: '0 auto', padding: '24px 16px' }}>
+      <div className="page-main" style={{ maxWidth: 1300, margin: '0 auto', padding: '24px 16px' }}>
         {/* NEW TICKET FORM */}
         {tab === 'form' && (
           <div className="fadeUp">
-            {lastTicket && (
-              <div style={{
-                background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)',
-                border: `2px solid ${C.green}`, borderRadius: 16, padding: 22, marginBottom: 22,
-                display: 'flex', gap: 16, alignItems: 'flex-start', boxShadow: '0 4px 16px #0f7a3d20'
-              }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 17, color: C.green, fontFamily: "'Poppins',sans-serif" }}>
-                    Ticket Submitted Successfully
-                  </div>
-                  <div style={{ color: C.text2, fontSize: 13, marginTop: 6 }}>Your Ticket ID:</div>
-                  <div style={{
-                    fontFamily: "'JetBrains Mono',monospace", fontSize: 20, fontWeight: 700,
-                    color: C.navy, marginTop: 4, letterSpacing: 1.5,
-                    background: C.goldL, padding: '6px 14px', borderRadius: 8,
-                    display: 'inline-block', border: `1px solid ${C.gold}`
-                  }}>{lastTicket.id}</div>
-                  <div style={{ fontSize: 12, color: C.muted, marginTop: 8 }}>
-                    Save this Ticket ID to track your ticket status.
-                  </div>
-                  <div style={{ fontSize: 12, color: C.green, marginTop: 6, fontWeight: 600 }}>
-                    Our team will respond soon. You can track status in "My Tickets" tab.
-                  </div>
-                </div>
-              </div>
-            )}
-            <Card style={{ padding: 36 }}>
+            <Card style={{ padding: 28 }}>
               <div style={{ marginBottom: 26, paddingBottom: 22, borderBottom: `1px solid ${C.border}` }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                  <div style={{ width: 4, height: 30, background: `linear-gradient(${C.navy},${C.gold})`, borderRadius: 2 }} />
-                  <h2 style={{ fontWeight: 700, fontSize: 23, color: C.text, fontFamily: "'Poppins',sans-serif" }}>
+                  <div style={{ width: 3, height: 26, background: C.navy, borderRadius: 2 }} />
+                  <h2 style={{ fontWeight: 700, fontSize: 20, color: C.text, fontFamily: "'DM Sans',sans-serif" }}>
                     Raise a New Ticket
                   </h2>
                 </div>
                 <p style={{ color: C.muted, fontSize: 14, marginLeft: 14 }}>
-                  Fill all fields carefully. Your ticket will be assigned immediately.
+                  Provide the details below to raise a new ticket.
                 </p>
               </div>
 
@@ -1512,37 +2894,9 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
                   options={DEPARTMENTS} placeholder="Search or type your department/location..." />
               </div>
 
-              <div style={{ marginBottom: 20 }}>
-                <FieldLabel required>Category</FieldLabel>
-                <div style={{
-                  display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))',
-                  gap: 18, background: C.off, border: `1px solid ${C.border}`, borderRadius: 16, padding: 22
-                }}>
-                  {COMPLAINT_TYPES.map(t => {
-                    const sel = form.type === t;
-                    return (
-                      <button key={t} onClick={() => sf('type', t)}
-                        style={{
-                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-                          padding: '14px 6px', borderRadius: 12, cursor: 'pointer', border: 'none',
-                          background: 'transparent'
-                        }}>
-                        <div style={{
-                          width: 80, height: 80, borderRadius: '50%', display: 'flex', alignItems: 'center',
-                          justifyContent: 'center', fontSize: 36,
-                          background: sel ? `linear-gradient(135deg,${C.navy2},${C.navy3})` : C.blueL,
-                          border: `2px solid ${sel ? C.navy : '#d7e6f7'}`,
-                          boxShadow: sel ? '0 4px 14px #0b4f4340' : 'none', transition: 'all .15s'
-                        }}>{TYPE_ICONS[t]}</div>
-                        <div style={{
-                          fontSize: 14, textAlign: 'center', lineHeight: 1.3, fontWeight: sel ? 700 : 500,
-                          color: sel ? C.navy : C.text2
-                        }}>{t}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              <SearchDropdown label="Category" required
+                value={form.type} onChange={v => sf('type', v)}
+                options={COMPLAINT_TYPES} placeholder="Search or select a category..." />
 
               <div style={{ marginBottom: 20 }}>
                 <FieldLabel required>Priority</FieldLabel>
@@ -1572,12 +2926,30 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
                   style={{ ...inputStyle, resize: 'vertical' }} />
               </div>
 
-              <div style={{
-                background: C.blueL, borderRadius: 10, padding: '10px 14px', marginBottom: 20,
-                border: `1px solid #bfdbfe`, fontSize: 13, color: C.blue
-              }}>
-                <strong>Note:</strong> The concerned team will respond to your ticket as soon as possible.
-              </div>
+              {(() => {
+                const dup = myComplaints.find(c => isActiveTicket(c) && form.type && form.dept && typeKey(c.type) === form.type && c.dept === form.dept);
+                const sugType = !!(aiHint && aiHint.type && aiHint.type !== form.type);
+                const sugPri = !!(aiHint && aiHint.priority !== form.priority);
+                if (!dup && !sugType && !sugPri) return null;
+                return (
+                  <div className="slideDown" style={{ background: C.goldL, border: `1px solid ${C.border2}`, borderRadius: 12, padding: '12px 14px', marginBottom: 18, display: 'grid', gap: 10 }}>
+                    {(sugType || sugPri) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <AiBadge />
+                        <span style={{ fontSize: 13, color: C.text2 }}>
+                          Suggested: {aiHint.type ? <strong>{aiHint.type}</strong> : null}{aiHint.type ? ', ' : ''}<strong>{PRIORITY_CFG[aiHint.priority].label} priority</strong>
+                        </span>
+                        <Btn onClick={() => { if (aiHint.type) sf('type', aiHint.type); sf('priority', aiHint.priority); }} variant="outline" size="sm">Apply</Btn>
+                      </div>
+                    )}
+                    {dup && (
+                      <div style={{ fontSize: 12.5, color: '#9a5b0b' }}>
+                        You already have an active ticket <strong>{dup.id}</strong> for this category and location.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <Btn onClick={submit} disabled={submitting} style={{ padding: '13px 32px' }} size="lg" variant="primary">
                 {submitting ? 'Submitting...' : 'Submit Ticket'}
@@ -1603,7 +2975,7 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
                 ))}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#059669', fontWeight: 600 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', animation: 'pulse 2s infinite', display: 'inline-block' }} />
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
                 Live Updates
               </div>
             </div>
@@ -1615,13 +2987,13 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
               </Card>
             ) : (
               <>
-                <div style={{ display: 'grid', gap: 14 }}>
-                  {recentComplaints.map(renderTicketCard)}
+                <div className="ticket-grid">
+                  {recentComplaints.map(c => renderTicketCard(c))}
                 </div>
-                {sortedComplaints.length > 5 && (
+                {sortedComplaints.length > 4 && (
                   <div style={{ textAlign: 'center', marginTop: 18 }}>
                     <Btn onClick={() => setHistoryOpen(true)} variant="outline" size="md">
-                      View All Previous Tickets ({sortedComplaints.length})
+                      View All Tickets ({sortedComplaints.length})
                     </Btn>
                   </div>
                 )}
@@ -1631,8 +3003,8 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
         )}
       </div>
 
-      {/* Ticket History Modal — last 5 shown above, full searchable history here */}
-      <Modal open={historyOpen} onClose={() => setHistoryOpen(false)} title="All My Previous Tickets" width={720}>
+      {/* All Tickets dialog — latest 4 shown on the page, everything searchable here */}
+      <Modal open={historyOpen} onClose={() => setHistoryOpen(false)} title="All My Tickets" width={980}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 10, marginBottom: 16 }}>
           <input value={histFilters.search} onChange={e => hf('search', e.target.value)}
             placeholder="Search ID / category / issue..." style={{ ...inputStyle, fontSize: 12, padding: '9px 12px' }} />
@@ -1646,29 +3018,14 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
             style={{ ...inputStyle, fontSize: 12, padding: '9px 12px' }} title="To date" />
         </div>
         <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-          {historyFiltered.length} of {sortedComplaints.length} tickets — pick a date range (e.g. last month, last year) or search to find an older ticket.
+          {historyFiltered.length} of {sortedComplaints.length} tickets
         </div>
         {historyFiltered.length === 0 ? (
           <div style={{ textAlign: 'center', color: C.muted, padding: 30 }}>No tickets match these filters</div>
         ) : (
           <>
-            <div style={{ display: 'grid', gap: 10, maxHeight: 460, overflow: 'auto' }}>
-              {historyFiltered.slice(0, histVisibleCount).map(c => (
-                <div key={c._docId || c.id} onClick={() => { setSelected(c); setHistoryOpen(false); }}
-                  style={{
-                    border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap'
-                  }}>
-                  <div>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
-                      <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11.5, color: C.navy, fontWeight: 700 }}>{c.id}</span>
-                      <Badge status={c.status} />
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{c.type}</div>
-                    <div style={{ fontSize: 11.5, color: C.muted }}>{c.dept} · {fmtDT(c.at)}</div>
-                  </div>
-                </div>
-              ))}
+            <div className="ticket-grid" style={{ maxHeight: '62vh', overflow: 'auto', alignContent: 'start' }}>
+              {historyFiltered.slice(0, histVisibleCount).map(c => renderTicketCard(c, (t) => setSelected(t)))}
             </div>
             {historyFiltered.length > histVisibleCount && (
               <div style={{ textAlign: 'center', marginTop: 12 }}>
@@ -1681,90 +3038,16 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
         )}
       </Modal>
 
-      {/* Detail Modal */}
-      <Modal open={!!selected} onClose={() => setSelected(null)}
-        title={`${selected?.id} — Full Details`} width={580}>
-        {selected && (
-          <div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }} className="grid-2">
-              {[
-                ['Ticket ID', selected.id, C.navy, true],
-                ['Current Status', STATUS_CFG[selected.status]?.label, STATUS_CFG[selected.status]?.color, false],
-                ['Priority', (PRIORITY_CFG[selected.priority] || PRIORITY_CFG[DEFAULT_PRIORITY]).label, (PRIORITY_CFG[selected.priority] || PRIORITY_CFG[DEFAULT_PRIORITY]).color, false],
-                ['Employee ID', selected.empId || '—', C.text, false],
-                ['Department/Location', selected.dept, C.text, false],
-                ['Category', selected.type, C.text, false],
-                ['Submitted On', fmtDT(selected.at), C.muted, false],
-                ...(selected.status === 'resolved' || selected.status === 'closed' ? [
-                  ['Resolved By', selected.actionBy || '—', C.green, false],
-                  ['Resolved On', fmtDT(selected.actionAt) || '—', C.green, false],
-                  ['Time Taken to Resolve', getDuration(selected.at, selected.actionAt), C.green, true],
-                ] : [])
-              ].map(([k, v, c, mono]) => (
-                <div key={k} style={{ background: C.off, borderRadius: 10, padding: '10px 14px', border: `1px solid ${C.border}` }}>
-                  <div style={{ fontSize: 10, color: C.muted, fontWeight: 700, letterSpacing: .6, marginBottom: 4, textTransform: 'uppercase' }}>{k}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: c, fontFamily: mono ? "'JetBrains Mono',monospace" : 'inherit' }}>{v}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ background: C.off, borderRadius: 10, padding: '12px 14px', marginBottom: 18, border: `1px solid ${C.border}` }}>
-              <div style={{ fontSize: 10, color: C.muted, fontWeight: 700, letterSpacing: .6, marginBottom: 6, textTransform: 'uppercase' }}>Issue Description</div>
-              <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.7 }}>{selected.desc}</div>
-            </div>
-            {selected.solution && (
-              <div style={{ background: C.greenL, borderRadius: 10, padding: '12px 14px', marginBottom: 18, border: `1px solid #a7f3d0` }}>
-                <div style={{ fontSize: 10, color: C.green, fontWeight: 700, letterSpacing: .6, marginBottom: 6, textTransform: 'uppercase' }}>Solution Applied</div>
-                <div style={{ fontSize: 13, color: C.green, lineHeight: 1.6, fontWeight: 500 }}>{selected.solution}</div>
-              </div>
-            )}
-            <div style={{ background: C.blueL, borderRadius: 10, padding: '10px 14px', marginBottom: 18, border: `1px solid #bfdbfe` }}>
-              <div style={{ fontSize: 13, color: C.blue }}>
-                The concerned team is working on your ticket. Thank you for your patience.
-              </div>
-            </div>
-            <div style={{
-              fontSize: 11, color: C.muted, fontWeight: 700, marginBottom: 14, letterSpacing: .6,
-              textTransform: 'uppercase', borderBottom: `1px solid ${C.border}`, paddingBottom: 10
-            }}>
-              Status History Timeline
-            </div>
-            <Timeline history={selected.history} />
-
-            {(selected.status === 'resolved' || selected.status === 'closed') && (
-              <div style={{ marginTop: 20, paddingTop: 18, borderTop: `1px solid ${C.border}` }}>
-                <div style={{ fontSize: 11, color: C.muted, fontWeight: 700, marginBottom: 10, letterSpacing: .6, textTransform: 'uppercase' }}>
-                  Rate this resolution
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-                  {RATING_OPTIONS.map(r => (
-                    <button key={r.key} onClick={() => rateTicket(selected, r.key)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 99,
-                        cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                        border: `2px solid ${selected.rating === r.key ? r.color : C.border}`,
-                        background: selected.rating === r.key ? `${r.color}18` : '#fff',
-                        color: selected.rating === r.key ? r.color : C.text2
-                      }}>
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-                <div style={{ marginBottom: 16 }}>
-                  <FieldLabel>Remark (optional)</FieldLabel>
-                  <textarea value={ratingRemarkDraft} onChange={e => setRatingRemarkDraft(e.target.value)}
-                    rows={2} placeholder="Anything you'd like to add about how this was resolved..."
-                    style={{ ...inputStyle, resize: 'vertical' }} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
-                    <Btn onClick={() => saveRatingRemark(selected)} variant="outline" size="sm">Save Remark</Btn>
-                    {remarkSaved && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>Saved ✓</span>}
-                  </div>
-                </div>
-                <Btn onClick={() => printComplaint(selected)} variant="outline" size="sm">Print Ticket / Resolution Slip</Btn>
-              </div>
-            )}
-          </div>
+      {/* Ticket window — large dialog, navbar stays */}
+      <Modal open={!!liveSelected} onClose={() => setSelected(null)} fullscreen z={1010}
+        title={liveSelected ? `Ticket ${liveSelected.id}  |  ${typeKey(liveSelected.type)}` : ''}>
+        {liveSelected && (
+          <TicketDetailView ticket={liveSelected} viewer="employee"
+            mainExtra={(liveSelected.status === 'resolved' || liveSelected.status === 'closed')
+              ? <FeedbackPanel ticket={liveSelected} onRate={rateTicket} onRemark={saveRatingRemark} /> : null} />
         )}
       </Modal>
+      <TicketAssistant tickets={myComplaints} viewer="employee" me={user} />
     </div>
   );
 }
@@ -1776,7 +3059,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
   const perms = deriveUserPerms(user);
   const [tab, setTab] = useState('complaints');
   const [complaints, setComplaints] = useState([]);
-  const [filters, setFilters] = useState({ dept: '', type: '', status: 'open', priority: '', search: '', from: '', to: '' });
+  const [filters, setFilters] = useState({ dept: '', type: '', status: perms.adminScope === 'assigned' ? 'hold' : 'open', priority: '', assign: '', search: '', from: '', to: '' });
   // however many tickets pile up over months/years, only render a page's worth
   // at a time — keeps the list smooth on phones instead of dumping everything
   // into the DOM at once.
@@ -1791,18 +3074,32 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
   const [userSearch, setUserSearch] = useState('');
   const [resetPwModal, setResetPwModal] = useState(null);
   const [newPwForUser, setNewPwForUser] = useState('');
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleteUserConfirm, setDeleteUserConfirm] = useState(null);
   const [addUserModal, setAddUserModal] = useState(false);
   // userType: 'employee' | 'categoryAdmin' | 'fullAdmin'.
   // alsoEmployee only matters for the two admin types — it additionally lets
   // that person raise their own tickets and switch between Employee/Admin views.
-  const [newUser, setNewUser] = useState({ username: '', displayName: '', password: '', userType: 'employee', alsoEmployee: false, adminCategories: [] });
+  const [newUser, setNewUser] = useState({ username: '', displayName: '', password: '', userType: 'employee', alsoEmployee: false, adminCategories: [], headUsernames: [] });
   const [addUserError, setAddUserError] = useState('');
   const [permModal, setPermModal] = useState(null);
-  const [permForm, setPermForm] = useState({ displayName: '', userType: 'employee', alsoEmployee: false, adminCategories: [] });
+  const [permForm, setPermForm] = useState({ displayName: '', userType: 'employee', alsoEmployee: false, adminCategories: [], headUsernames: [] });
   const [permError, setPermError] = useState('');
   const [showNotif, setShowNotif] = useState(false);
+  const [viewMode, setViewMode] = useState('grid');
+  const [showFilters, setShowFilters] = useState(false);
+  const [assignModal, setAssignModal] = useState(null);
+  const [assignForm, setAssignForm] = useState({ tech: '', note: '' });
+  const [assignError, setAssignError] = useState('');
+
+  // Keep an open ticket popup in sync with live data (so a fresh allocation or
+  // new status shows up without closing and reopening it).
+  useEffect(() => {
+    setDetailModal(prev => {
+      if (!prev) return prev;
+      const fresh = complaints.find(x => x._docId === prev._docId);
+      return fresh || prev;
+    });
+  }, [complaints]);
   const af = (k, v) => setActionForm(s => ({ ...s, [k]: v }));
   const setF = (k, v) => { setFilters(s => ({ ...s, [k]: v })); setVisibleCount(20); };
   const nu = (k, v) => setNewUser(s => ({ ...s, [k]: v }));
@@ -1811,38 +3108,44 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
   useEffect(() => {
     const unsub1 = FireDB.subscribeComplaints(data => setComplaints(data));
     const loadUsers = async () => {
+      // Technicians never need the user list, so don't pull it into their browser.
+      if (perms.adminScope === 'assigned') return;
       const u = await FireDB.getUsers();
       if (u) setUsers(u);
     };
     loadUsers();
     return () => { unsub1(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Department-wise scoping: a Full Admin sees every ticket; a category-limited
   // admin only sees tickets whose category is in their assigned list.
   const scopedComplaints = useMemo(() => {
     if (perms.adminScope === 'all') return complaints;
-    if (perms.adminScope === 'categories') return complaints.filter(c => perms.adminCategories.includes(c.type));
+    if (perms.adminScope === 'categories') return complaints.filter(c => perms.adminCategories.includes(typeKey(c.type)));
+    if (perms.adminScope === 'assigned') return complaints.filter(c => safeLC(c.assignedTo) === safeLC(user.username));
     return [];
-  }, [complaints, perms.adminScope, perms.adminCategories]);
+  }, [complaints, perms.adminScope, perms.adminCategories, user.username]);
 
   const scopedTypes = perms.adminScope === 'categories' ? COMPLAINT_TYPES.filter(t => perms.adminCategories.includes(t)) : COMPLAINT_TYPES;
+
+  // Allocation helpers: every technician, only the ones reporting to me, and the
+  // people a technician can be attached to as a head.
+  const technicians = useMemo(() => users.filter(u => deriveUserPerms(u).isTechnician), [users]);
+  const myTechnicians = useMemo(() => perms.adminScope === 'all'
+    ? technicians
+    : technicians.filter(t => headUsernamesOf(t).map(safeLC).includes(safeLC(user.username))),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [technicians, perms.adminScope, user.username]);
+  const filterTechnicians = useMemo(() => technicians.filter(t =>
+    myTechnicians.some(m => m.username === t.username) || scopedComplaints.some(c => safeLC(c.assignedTo) === safeLC(t.username))),
+  [technicians, myTechnicians, scopedComplaints]);
+  const headOptions = useMemo(() => users.filter(u => { const p = deriveUserPerms(u); return p.isAdmin && !p.isTechnician; }), [users]);
 
   const deptOptionsInScope = useMemo(() => {
     const set = new Set(scopedComplaints.map(c => c.dept).filter(Boolean));
     return Array.from(set).sort();
   }, [scopedComplaints]);
-
-  // Category-wise counts within the current status filter — lets an admin
-  // (especially a Full Admin watching every department) quickly jump to a
-  // specific category's tickets when a lot of tickets are coming in.
-  const categoryCounts = useMemo(() => {
-    const base = filters.status ? scopedComplaints.filter(c => c.status === filters.status) : scopedComplaints;
-    return scopedTypes
-      .map(t => ({ type: t, count: base.filter(c => c.type === t).length }))
-      .filter(c => c.count > 0)
-      .sort((a, b) => b.count - a.count);
-  }, [scopedComplaints, scopedTypes, filters.status]);
 
   const markNotificationsSeen = async () => {
     const ts = now();
@@ -1852,10 +3155,23 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
 
   const newTickets = useMemo(() => {
     const lastSeenAt = user.lastSeenAt || null;
+    const stamp = (c) => (perms.adminScope === 'assigned' && c.assignedAt) ? c.assignedAt : c.at;
     return scopedComplaints
-      .filter(c => !lastSeenAt || new Date(c.at) > new Date(lastSeenAt))
-      .sort((a, b) => new Date(b.at) - new Date(a.at));
-  }, [scopedComplaints, user.lastSeenAt]);
+      .filter(c => c.status === 'open' || c.status === 'hold')
+      .filter(c => !lastSeenAt || new Date(stamp(c)) > new Date(lastSeenAt))
+      .sort((a, b) => new Date(stamp(b)) - new Date(stamp(a)));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedComplaints, user.lastSeenAt, perms.adminScope]);
+
+  // Opening the bell shows the current alerts and marks them read straight away,
+  // so the badge clears and the same alerts never come back.
+  const [notifList, setNotifList] = useState([]);
+  const toggleNotif = () => {
+    if (showNotif) { setShowNotif(false); return; }
+    setNotifList(newTickets.slice(0, 10));
+    setShowNotif(true);
+    if (newTickets.length > 0) markNotificationsSeen();
+  };
 
   // Real OS-level desktop notification on top of the in-app bell, so a new
   // ticket gets noticed even if this tab isn't focused. Guarded on every side —
@@ -1879,12 +3195,12 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
     try {
       if (arrived.length === 1) {
         const c = arrived[0];
-        new Notification(`New Ticket — ${c.id}`, { body: `${c.type} · ${c.dept}\n${c.userName}` });
+        new Notification(perms.adminScope === 'assigned' ? `Ticket Assigned To You — ${c.id}` : `New Ticket — ${c.id}`, { body: `${c.type} · ${c.dept}\n${c.userName}` });
       } else {
         new Notification(`${arrived.length} New Tickets`, { body: 'Open the admin portal to view them.' });
       }
     } catch (e) { console.warn('Desktop notification failed:', e); }
-  }, [scopedComplaints, notifSupported, notifPermission]);
+  }, [scopedComplaints, notifSupported, notifPermission, perms.adminScope]);
 
   const enableDesktopAlerts = () => {
     if (!notifSupported) return;
@@ -1902,8 +3218,11 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
     const rows = scopedComplaints.filter(c => {
       if (filters.dept && c.dept !== filters.dept) return false;
       if (filters.type && c.type !== filters.type) return false;
-      if (filters.status && c.status !== filters.status) return false;
+      if (filters.status === 'done') { if (c.status !== 'resolved' && c.status !== 'closed') return false; }
+      else if (filters.status && c.status !== filters.status) return false;
       if (filters.priority && c.priority !== filters.priority) return false;
+      if (filters.assign === 'unassigned' && c.assignedTo) return false;
+      if (filters.assign && filters.assign !== 'unassigned' && safeLC(c.assignedTo) !== safeLC(filters.assign)) return false;
       if (filters.from && new Date(c.at) < new Date(filters.from)) return false;
       if (filters.to && new Date(c.at) > new Date(filters.to + 'T23:59:59')) return false;
       if (filters.search) {
@@ -1936,50 +3255,93 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
   const openAction = (complaint, type) => {
     setActionModal(complaint);
     setActionType(type);
-    setActionForm({ actionBy: '', solution: '', reason: '' });
+    setActionForm({ actionBy: perms.adminScope === 'assigned' ? (user.displayName || '') : '', solution: '', reason: '' });
+  };
+
+  const openAssign = (c) => {
+    setAssignModal(c);
+    setAssignForm({ tech: c.assignedTo || '', note: '' });
+    setAssignError('');
+  };
+
+  // Level-2 allocation: a head (or full admin) hands the ticket to a technician.
+  // The ticket moves to Processing, the employee instantly sees who has it, and
+  // the technician gets it in their own portal + alert.
+  const doAssign = async () => {
+    const c = assignModal;
+    if (!assignForm.tech) { setAssignError('Please select a technician'); return; }
+    const tech = technicians.find(t => safeLC(t.username) === safeLC(assignForm.tech));
+    if (!tech) { setAssignError('Technician not found'); return; }
+    if (c.assignedTo && safeLC(c.assignedTo) === safeLC(tech.username)) { setAssignError('Already assigned to this technician'); return; }
+    const reassign = !!c.assignedTo;
+    const note = assignForm.note.trim();
+    const ts = now();
+    const entry = {
+      status: 'hold', at: ts, by: '', actionBy: user.displayName, role: 'head', kind: 'allocation',
+      techName: tech.displayName, instruction: note,
+      note: `${reassign ? 'Reallocated' : 'Allocated'} to technician ${tech.displayName} by ${user.displayName}.` +
+        `${reassign ? ` Previously with ${c.assignedToName || c.assignedTo}.` : ''}${note ? ` Instruction: ${note}` : ''}`
+    };
+    const data = {
+      assignedTo: tech.username, assignedToName: tech.displayName,
+      assignedBy: user.username, assignedByName: user.displayName, assignedAt: ts,
+      assignHistory: [...(c.assignHistory || []), { to: tech.username, toName: tech.displayName, by: user.username, byName: user.displayName, at: ts, note }],
+      status: 'hold',
+      holdReason: `Allocated to ${tech.displayName}`,
+      history: [...(c.history || []), entry]
+    };
+    await FireDB.updateComplaint(c._docId, data);
+    Logger.log('allocation', reassign ? 'TICKET_REASSIGNED' : 'TICKET_ASSIGNED', user, {
+      ticketId: c.id, target: tech.username,
+      details: `${reassign ? `From ${c.assignedToName || c.assignedTo} to` : 'To'} ${tech.displayName}${note ? ` — ${note}` : ''}`
+    });
+    setAssignModal(null);
+    toast.success(`Ticket ${c.id} allocated to ${tech.displayName}`);
+    setDetailModal({ ...c, ...data });
   };
 
   const doAction = async () => {
     const c = actionModal;
     const type = actionType;
     let newStatus = '', histEntries = [], updateData = {};
+    const actorRole = perms.adminScope === 'assigned' ? 'technician' : 'admin';
 
     if (type === 'resolve') {
-      if (!actionForm.actionBy.trim() || !actionForm.solution.trim()) { alert('Fill all fields'); return; }
+      if (!actionForm.actionBy.trim() || !actionForm.solution.trim()) { toast.error('Fill all fields'); return; }
       // Resolving a ticket automatically closes it
       newStatus = 'closed';
       histEntries = [
         {
-          status: 'resolved', at: now(), by: '', actionBy: actionForm.actionBy,
-          note: `Issue resolved. Solution: ${actionForm.solution}`
+          status: 'resolved', at: now(), by: '', actionBy: actionForm.actionBy, role: actorRole, detail: actionForm.solution,
+          note: `Resolved. Solution: ${actionForm.solution}`
         },
         {
-          status: 'closed', at: now(), by: '', actionBy: actionForm.actionBy,
-          note: 'Ticket automatically closed after resolution.'
+          status: 'closed', at: now(), by: '', actionBy: actionForm.actionBy, role: actorRole,
+          note: 'Closed automatically after resolution.'
         }
       ];
       updateData = { actionBy: actionForm.actionBy, solution: actionForm.solution, actionAt: now() };
     } else if (type === 'hold') {
-      if (!actionForm.reason.trim()) { alert('Please enter a reason'); return; }
+      if (!actionForm.reason.trim()) { toast.error('Please enter a reason'); return; }
       newStatus = 'hold';
       histEntries = [{
-        status: 'hold', at: now(), by: '', actionBy: user.displayName,
-        note: `Ticket is being processed. Reason: ${actionForm.reason}`
+        status: 'hold', at: now(), by: '', actionBy: user.displayName, role: actorRole, detail: actionForm.reason,
+        note: actorRole === 'technician' ? `Technician update: ${actionForm.reason}` : `Under review: ${actionForm.reason}`
       }];
       updateData = { holdReason: actionForm.reason };
     } else if (type === 'refuse') {
-      if (!actionForm.reason.trim()) { alert('Please enter refusal reason'); return; }
+      if (!actionForm.reason.trim()) { toast.error('Please enter refusal reason'); return; }
       newStatus = 'refused';
       histEntries = [{
-        status: 'refused', at: now(), by: '', actionBy: user.displayName,
-        note: `Ticket refused. Reason: ${actionForm.reason}`
+        status: 'refused', at: now(), by: '', actionBy: user.displayName, role: actorRole, detail: actionForm.reason,
+        note: `Refused. Reason: ${actionForm.reason}`
       }];
       updateData = { refuseReason: actionForm.reason };
     } else if (type === 'close') {
       newStatus = 'closed';
       histEntries = [{
-        status: 'closed', at: now(), by: '', actionBy: user.displayName,
-        note: actionForm.reason ? `Ticket closed. Note: ${actionForm.reason}` : 'Ticket closed.'
+        status: 'closed', at: now(), by: '', actionBy: user.displayName, role: actorRole, detail: actionForm.reason || '',
+        note: actionForm.reason ? `Closed. Note: ${actionForm.reason}` : 'Closed.'
       }];
     }
 
@@ -1988,41 +3350,41 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
       history: [...(c.history || []), ...histEntries],
       ...updateData
     });
+    const logNames = { resolve: 'TICKET_RESOLVED', hold: 'TICKET_PROCESSING', refuse: 'TICKET_REFUSED', close: 'TICKET_CLOSED' };
+    Logger.log('ticket', logNames[type] || 'TICKET_UPDATED', user, {
+      ticketId: c.id, target: c.userId,
+      details: type === 'resolve' ? `Resolved by ${actionForm.actionBy}: ${actionForm.solution}` : (actionForm.reason || '')
+    });
     setActionModal(null);
     setDetailModal(null);
-  };
-
-  const handleDelete = async (complaint) => {
-    await FireDB.deleteComplaint(complaint._docId);
-    setDeleteConfirm(null);
-    setDetailModal(null);
+    toast.success(type === 'resolve' ? `Ticket ${c.id} resolved successfully` : type === 'hold' ? (perms.adminScope === 'assigned' ? 'Update posted successfully' : `Ticket ${c.id} marked as processing`) : type === 'refuse' ? `Ticket ${c.id} refused` : `Ticket ${c.id} closed`);
   };
 
   const handleDeleteUser = async (u) => {
     if (safeLC(u.username) === safeLC(user.username)) {
-      alert("You can't remove the account you're currently logged in as.");
+      toast.error("You can't remove the account you're currently logged in as.");
       setDeleteUserConfirm(null);
       return;
     }
     await FireDB.deleteUser(u.username);
+    Logger.log('user', 'USER_DELETED', user, { target: u.username, details: roleSummaryLabel(deriveUserPerms(u)) });
     setUsers(prev => prev.filter(x => x.username !== u.username));
     setDeleteUserConfirm(null);
   };
 
-  const toggleCategoryIn = (listSetter, list, cat) => {
-    listSetter(list.includes(cat) ? list.filter(x => x !== cat) : [...list, cat]);
-  };
-
   // Turns the simple "userType + alsoEmployee + categories" choice into the
   // underlying isEmployee/isAdmin/adminScope/adminCategories + legacy role fields.
-  const buildAccessFields = (userType, alsoEmployee, adminCategories) => {
+  const buildAccessFields = (userType, alsoEmployee, adminCategories, headUsernames = []) => {
     if (userType === 'fullAdmin') {
-      return { isEmployee: !!alsoEmployee, isAdmin: true, adminScope: 'all', adminCategories: [], role: alsoEmployee ? 'both' : 'admin' };
+      return { isEmployee: !!alsoEmployee, isAdmin: true, adminScope: 'all', adminCategories: [], isTechnician: false, headUsernames: [], headUsername: '', role: alsoEmployee ? 'both' : 'admin' };
     }
     if (userType === 'categoryAdmin') {
-      return { isEmployee: !!alsoEmployee, isAdmin: true, adminScope: 'categories', adminCategories, role: alsoEmployee ? 'both' : 'admin' };
+      return { isEmployee: !!alsoEmployee, isAdmin: true, adminScope: 'categories', adminCategories, isTechnician: false, headUsernames: [], headUsername: '', role: alsoEmployee ? 'both' : 'admin' };
     }
-    return { isEmployee: true, isAdmin: false, adminScope: 'none', adminCategories: [], role: 'user' };
+    if (userType === 'technician') {
+      return { isEmployee: !!alsoEmployee, isAdmin: true, adminScope: 'assigned', adminCategories: [], isTechnician: true, headUsernames, headUsername: headUsernames[0] || '', role: alsoEmployee ? 'both' : 'technician' };
+    }
+    return { isEmployee: true, isAdmin: false, adminScope: 'none', adminCategories: [], isTechnician: false, headUsernames: [], headUsername: '', role: 'user' };
   };
 
   const handleAddUser = async () => {
@@ -2033,9 +3395,12 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
     if (newUser.userType === 'categoryAdmin' && newUser.adminCategories.length === 0) {
       setAddUserError('Select at least one category for this admin, or choose Full Admin'); return;
     }
+    if (newUser.userType === 'technician' && (newUser.headUsernames || []).length === 0) {
+      setAddUserError('Select at least one head for this technician'); return;
+    }
     const clean = newUser.username.trim().toLowerCase().replace(/\s+/g, '.');
     if (users.find(u => safeLC(u.username) === clean)) { setAddUserError('Username already exists'); return; }
-    const access = buildAccessFields(newUser.userType, newUser.alsoEmployee, newUser.adminCategories);
+    const access = buildAccessFields(newUser.userType, newUser.alsoEmployee, newUser.adminCategories, newUser.headUsernames || []);
     const userData = {
       username: clean,
       displayName: newUser.displayName.trim(),
@@ -2046,9 +3411,10 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
     const ok = await FireDB.addUser(userData);
     if (ok) {
       setUsers(prev => [...prev, userData]);
+      Logger.log('user', 'USER_ADDED', user, { target: clean, details: roleSummaryLabel(deriveUserPerms(userData)) });
       setAddUserModal(false);
-      setNewUser({ username: '', displayName: '', password: '', userType: 'employee', alsoEmployee: false, adminCategories: [] });
-      alert(`User "${clean}" added successfully!`);
+      setNewUser({ username: '', displayName: '', password: '', userType: 'employee', alsoEmployee: false, adminCategories: [], headUsernames: [] });
+      toast.success(`User "${clean}" added successfully`);
     } else {
       setAddUserError('Failed to add user. Please try again.');
     }
@@ -2056,8 +3422,8 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
 
   const openPermModal = (u) => {
     const p = deriveUserPerms(u);
-    const userType = p.isAdmin ? (p.adminScope === 'categories' ? 'categoryAdmin' : 'fullAdmin') : 'employee';
-    setPermForm({ displayName: u.displayName || '', userType, alsoEmployee: p.isAdmin ? p.isEmployee : false, adminCategories: p.adminCategories });
+    const userType = p.isAdmin ? (p.adminScope === 'categories' ? 'categoryAdmin' : p.adminScope === 'assigned' ? 'technician' : 'fullAdmin') : 'employee';
+    setPermForm({ displayName: u.displayName || '', userType, alsoEmployee: p.isAdmin ? p.isEmployee : false, adminCategories: p.adminCategories, headUsernames: p.headUsernames || [] });
     setPermError('');
     setPermModal(u);
   };
@@ -2068,67 +3434,62 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
     if (permForm.userType === 'categoryAdmin' && permForm.adminCategories.length === 0) {
       setPermError('Select at least one category, or choose Full Admin'); return;
     }
-    const access = buildAccessFields(permForm.userType, permForm.alsoEmployee, permForm.adminCategories);
+    if (permForm.userType === 'technician' && (permForm.headUsernames || []).length === 0) {
+      setPermError('Select at least one head for this technician'); return;
+    }
+    const access = buildAccessFields(permForm.userType, permForm.alsoEmployee, permForm.adminCategories, permForm.headUsernames || []);
     const data = { displayName: permForm.displayName.trim(), ...access };
     await FireDB.updateUser(permModal.username, data);
+    Logger.log('user', 'USER_ACCESS_CHANGED', user, { target: permModal.username, details: `Now: ${roleSummaryLabel(deriveUserPerms({ ...permModal, ...data }))}${(data.headUsernames || []).length ? ` (heads: ${data.headUsernames.join(', ')})` : ''}` });
     setUsers(prev => prev.map(u => u.username === permModal.username ? { ...u, ...data } : u));
     setPermModal(null);
   };
 
   const exportExcel = () => {
-    const hdr = [
-      'Ticket ID', 'Priority', 'Employee Name', 'Employee ID', 'Department/Location', 'Category',
-      'Description', 'Status', 'Rating', 'Rating Remark', 'Raised On', 'Resolved On', 'Time Taken to Resolve',
-      'Resolved By', 'Solution', 'Processing Note', 'Refused Reason'
-    ];
-    const ratingLabel = key => RATING_OPTIONS.find(r => r.key === key)?.label || '';
-    const priorityLabel = key => (PRIORITY_CFG[key] || PRIORITY_CFG[DEFAULT_PRIORITY]).label;
-    const rows = filtered.map(c => [
-      c.id,
-      priorityLabel(c.priority),
-      c.userName || '',
-      c.empId || '',
-      c.dept || '',
-      c.type || '',
-      c.desc || '',
-      STATUS_CFG[c.status]?.label || c.status || '',
-      ratingLabel(c.rating),
-      c.ratingRemark || '',
-      fmtDT(c.at),
-      c.actionAt ? fmtDT(c.actionAt) : '',
-      c.actionAt ? getDuration(c.at, c.actionAt) : '',
-      c.actionBy || '',
-      c.solution || '',
-      c.holdReason || '',
-      c.refuseReason || ''
-    ]);
-    const ws = XLSX.utils.aoa_to_sheet([hdr, ...rows]);
-    ws['!cols'] = [
-      { wch: 14 }, { wch: 10 }, { wch: 20 }, { wch: 12 }, { wch: 24 }, { wch: 18 },
-      { wch: 42 }, { wch: 12 }, { wch: 12 }, { wch: 28 }, { wch: 20 }, { wch: 20 }, { wch: 14 },
-      { wch: 18 }, { wch: 32 }, { wch: 22 }, { wch: 22 }
-    ];
-    const wb = XLSX.utils.book_new();
-    const sheetName = perms.adminScope === 'categories' ? `Tickets (${perms.adminCategories.join(', ')})`.slice(0, 31) : 'Tickets';
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    const scopeTag = perms.adminScope === 'categories' ? `_${perms.adminCategories.join('-')}` : '';
-    XLSX.writeFile(wb, `CHRC_IDAR_Tickets${scopeTag}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const bits = [];
+    if (filters.status) bits.push(`Status: ${filters.status === 'done' ? 'Resolved / Closed' : (STATUS_CFG[filters.status]?.label || filters.status)}`);
+    if (filters.type) bits.push(`Category: ${filters.type}`);
+    if (filters.dept) bits.push(`Department: ${filters.dept}`);
+    if (filters.priority) bits.push(`Priority: ${(PRIORITY_CFG[filters.priority] || {}).label || filters.priority}`);
+    if (filters.assign) bits.push(`Technician: ${filters.assign === 'unassigned' ? 'Not assigned' : ((technicians.find(t => t.username === filters.assign) || {}).displayName || filters.assign)}`);
+    if (filters.from) bits.push(`From: ${filters.from}`);
+    if (filters.to) bits.push(`To: ${filters.to}`);
+    if (filters.search) bits.push(`Search: ${filters.search}`);
+    const scope = perms.adminScope === 'all' ? 'All categories'
+      : perms.adminScope === 'categories' ? perms.adminCategories.join(', ') || 'N/A' : 'Tickets allocated to me';
+    const rows = [...filtered].sort((x, y) => new Date(y.at) - new Date(x.at));
+    const wb = buildTicketReport(rows, { scope, filters: bits.length ? bits.join(' | ') : 'None (all records)' });
+    const scopeTag = perms.adminScope === 'categories' ? `_${perms.adminCategories.join('-')}`.replace(/[^A-Za-z0-9_-]/g, '') : '';
+    XLSX.writeFile(wb, `CHRC_IDAR_Ticket_Report${scopeTag}_${xlTick()}.xlsx`);
   };
 
   const changeAdminPw = async () => {
-    if (newAdminPw.pw1.length < 3) { alert('Min 3 characters'); return; }
-    if (newAdminPw.pw1 !== newAdminPw.pw2) { alert("Passwords don't match"); return; }
+    if (newAdminPw.pw1.length < 3) { toast.error('Min 3 characters'); return; }
+    if (newAdminPw.pw1 !== newAdminPw.pw2) { toast.error("Passwords don't match"); return; }
     await FireDB.updateUser(user.username, { password: newAdminPw.pw1 });
+    Logger.log('auth', 'PASSWORD_CHANGED', user, { details: 'Changed from admin portal' });
     setPwModal(false); setNewAdminPw({ pw1: '', pw2: '' });
-    alert('Password changed successfully!');
+    toast.success('Password changed successfully');
   };
 
   const resetUserPw = async () => {
-    if (!newPwForUser.trim()) { alert('Enter new password'); return; }
+    if (!newPwForUser.trim()) { toast.error('Enter new password'); return; }
     await FireDB.updateUser(resetPwModal.username, { password: newPwForUser, firstLogin: true });
+    Logger.log('user', 'PASSWORD_RESET_BY_ADMIN', user, { target: resetPwModal.username, details: 'Temporary password set, change forced at next login' });
     setResetPwModal(null); setNewPwForUser('');
-    alert(`Password reset for ${resetPwModal.username}!`);
+    toast.success(`Password reset for ${resetPwModal.username}`);
   };
+
+  const kpiExtra = useMemo(() => {
+    const doneRows = scopedComplaints.filter(c => (c.status === 'resolved' || c.status === 'closed') && c.actionAt && c.at);
+    const avgMs = doneRows.length ? doneRows.reduce((acc, c) => acc + (new Date(c.actionAt) - new Date(c.at)), 0) / doneRows.length : 0;
+    const nowMs = Date.now();
+    return {
+      rate: stats.total ? Math.round((stats.resolved / stats.total) * 100) : 0,
+      avg: doneRows.length ? fmtSpan(avgMs) : 'N/A',
+      overdue: scopedComplaints.filter(c => slaState(c, nowMs)).length
+    };
+  }, [scopedComplaints, stats]);
 
   const chartData = useMemo(() => {
     const map = {};
@@ -2148,7 +3509,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
     scopedTypes.map(t => ({ name: t, value: scopedComplaints.filter(c => c.type === t).length }))
       .filter(d => d.value > 0), [scopedComplaints, scopedTypes]);
 
-  const CHART_COLORS = ['#0b4f43', '#12a37f', '#059669', '#dc2626', '#7c3aed'];
+  const chartColors = () => [C.navy, C.gold2, '#059669', '#dc2626', '#7c3aed'];
 
   const filteredUsers = useMemo(() =>
     users.filter(u => safeLC(u.username).includes(userSearch.toLowerCase()) ||
@@ -2156,51 +3517,35 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
     , [users, userSearch]);
 
   const TABS = perms.adminScope === 'all'
-    ? [['complaints', 'Tickets'], ['analytics', 'Analytics'], ['users', 'Users']]
+    ? [['complaints', 'Tickets'], ['analytics', 'Analytics'], ['users', 'Users'], ['logs', 'Logs']]
     : [['complaints', 'Tickets'], ['analytics', 'Analytics']];
 
   const selectStyle = { ...inputStyle, fontSize: 12, padding: '9px 12px', height: 40 };
 
-  const getActionButtons = (c, inModal = false) => {
-    const close = inModal ? () => { openAction(c, 'close'); setDetailModal(null); }
-      : () => openAction(c, 'close');
-    const resolve = inModal ? () => { openAction(c, 'resolve'); setDetailModal(null); }
-      : () => openAction(c, 'resolve');
-    const hold = inModal ? () => { openAction(c, 'hold'); setDetailModal(null); }
-      : () => openAction(c, 'hold');
-    const refuse = inModal ? () => { openAction(c, 'refuse'); setDetailModal(null); }
-      : () => openAction(c, 'refuse');
-
+  const getActionButtons = (c) => {
+    const go = (fn) => () => { fn(); setDetailModal(null); };
+    const isTech = perms.adminScope === 'assigned';
+    const list = [];
     if (c.status === 'open' || c.status === 'hold') {
-      return (
-        <>
-          <Btn onClick={resolve} variant="success" size="sm">Resolve</Btn>
-          {c.status === 'open' && <Btn onClick={hold} variant="warning" size="sm">Process</Btn>}
-          {c.status === 'hold' && <Btn onClick={close} variant="ghost" size="sm">Close</Btn>}
-          <Btn onClick={refuse} variant="danger" size="sm">Refuse</Btn>
-        </>
-      );
+      if (perms.canAssign) list.push(<Btn key="assign" onClick={go(() => openAssign(c))} variant="purple" size="sm">{c.assignedTo ? 'Reassign' : 'Assign'}</Btn>);
+      list.push(<Btn key="resolve" onClick={go(() => openAction(c, 'resolve'))} variant="success" size="sm">Resolve</Btn>);
+      if (c.status === 'open' && !isTech) list.push(<Btn key="hold" onClick={go(() => openAction(c, 'hold'))} variant="warning" size="sm">Process</Btn>);
+      if (c.status === 'hold' && isTech) list.push(<Btn key="update" onClick={go(() => openAction(c, 'hold'))} variant="warning" size="sm">Post Update</Btn>);
+      if (c.status === 'hold' && !isTech) list.push(<Btn key="close" onClick={go(() => openAction(c, 'close'))} variant="ghost" size="sm">Close</Btn>);
+      if (!isTech) list.push(<Btn key="refuse" onClick={go(() => openAction(c, 'refuse'))} variant="danger" size="sm">Refuse</Btn>);
+    } else if (c.status === 'resolved') {
+      list.push(<Btn key="close" onClick={go(() => openAction(c, 'close'))} variant="ghost" size="sm">Close</Btn>);
     }
-    if (c.status === 'resolved') {
-      return (
-        <>
-          <Btn onClick={close} variant="ghost" size="sm">Close</Btn>
-          <Btn onClick={() => printComplaint(c)} variant="outline" size="sm">Print</Btn>
-        </>
-      );
-    }
-    if (c.status === 'closed') {
-      return <Btn onClick={() => printComplaint(c)} variant="outline" size="sm">Print</Btn>;
-    }
-    return null;
+    if (!isTech) list.push(<Btn key="print" onClick={() => printComplaint(c)} variant="outline" size="sm">Print</Btn>);
+    return list;
   };
 
   return (
     <div style={{ minHeight: '100vh', background: C.off }}>
-      <style>{GS}</style>
+      <style>{buildGS()}</style>
       <TopBar
-        subtitle="Admin Portal — Complaint & Request Management System"
-        roleLabel={perms.adminScope === 'categories' ? `Category Admin — ${perms.adminCategories.join(', ') || 'none selected'}` : roleSummaryLabel(perms)}
+        subtitle={perms.adminScope === 'assigned' ? 'Technician Portal — My Allocated Tickets' : 'Admin Portal — Complaint & Request Management System'}
+        roleLabel={roleSummaryLabel(perms)}
         user={user}
         onLogout={onLogout}
         tabs={TABS}
@@ -2216,13 +3561,13 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
               </Btn>
             )}
             <div style={{ position: 'relative' }}>
-              <button onClick={() => setShowNotif(s => !s)}
+              <button onClick={toggleNotif}
                 style={{
                   position: 'relative', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.3)',
                   borderRadius: 8, width: 36, height: 36, cursor: 'pointer', fontSize: 16, color: '#fff',
                   display: 'flex', alignItems: 'center', justifyContent: 'center'
                 }} title="Notifications">
-                🔔
+                <BellIcon />
                 {newTickets.length > 0 && (
                   <span style={{
                     position: 'absolute', top: -6, right: -6, background: '#dc2626', color: '#fff',
@@ -2238,29 +3583,23 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                   boxShadow: '0 20px 50px #0b2a2240', border: `1px solid ${C.border}`, zIndex: 400, overflow: 'hidden'
                 }}>
                   <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>New Tickets</span>
+                    <span style={{ fontWeight: 600, fontSize: 13, color: C.text }}>{perms.adminScope === 'assigned' ? 'Assigned to you' : 'New tickets'}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      {newTickets.length > 0 && (
-                        <button onClick={() => { markNotificationsSeen(); setShowNotif(false); }}
-                          style={{ background: 'none', border: 'none', color: C.navy, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                          Mark all read
-                        </button>
-                      )}
                       <button onClick={() => setShowNotif(false)} title="Close"
                         style={{ background: 'none', border: 'none', color: C.muted, fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>×</button>
                     </div>
                   </div>
                   <div style={{ maxHeight: 320, overflow: 'auto' }}>
-                    {newTickets.length === 0 ? (
-                      <div style={{ padding: 20, textAlign: 'center', color: C.muted, fontSize: 12.5 }}>No new tickets</div>
-                    ) : newTickets.slice(0, 10).map(c => (
+                    {notifList.length === 0 ? (
+                      <div style={{ padding: 20, textAlign: 'center', color: C.muted, fontSize: 12.5 }}>No new notifications</div>
+                    ) : notifList.map(c => (
                       <div key={c._docId} onClick={() => { setDetailModal(c); setShowNotif(false); setTab('complaints'); }}
                         style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                           <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: C.navy, fontWeight: 700 }}>{c.id}</span>
-                          <span style={{ fontSize: 10.5, color: C.muted }}>{fmtDT(c.at)}</span>
+                          <span style={{ fontSize: 10.5, color: C.muted }}>{fmtDT(perms.adminScope === 'assigned' && c.assignedAt ? c.assignedAt : c.at)}</span>
                         </div>
-                        <div style={{ fontSize: 12.5, color: C.text2, fontWeight: 600, marginTop: 2 }}>{c.type} · {c.dept}</div>
+                        <div style={{ fontSize: 12.5, color: C.text2, fontWeight: 600, marginTop: 2 }}>{typeKey(c.type)} · {c.dept}</div>
                       </div>
                     ))}
                   </div>
@@ -2289,159 +3628,142 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
         }
       />
 
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 20px' }}>
-        {perms.adminScope === 'categories' && (
-          <div style={{
-            background: C.goldL, border: `1px solid ${C.gold}55`, borderRadius: 10, padding: '10px 16px',
-            marginBottom: 18, fontSize: 13, color: C.navy
-          }}>
-            You have admin access for: <strong>{perms.adminCategories.join(', ') || '—'}</strong>. Tickets, analytics and exports below are limited to these categories.
-          </div>
-        )}
-
-        {/* STATS ROW — click a card to quick-filter the ticket list below by that status */}
-        <div style={{ display: 'flex', gap: 14, marginBottom: 24, flexWrap: 'wrap' }}>
-          <StatCard icon="A" label="All Tickets" value={stats.total} color={C.navy} bg={C.blueL}
-            active={filters.status === ''} onClick={() => { setF('status', ''); setTab('complaints'); }} />
-          <StatCard icon="O" label="Open" value={stats.open} color='#1e40af' bg='#dbeafe'
-            active={filters.status === 'open'} onClick={() => { setF('status', 'open'); setTab('complaints'); }} />
-          <StatCard icon="P" label="Processing" value={stats.hold} color={C.yellow} bg={C.yellowL}
-            active={filters.status === 'hold'} onClick={() => { setF('status', 'hold'); setTab('complaints'); }} />
-          <StatCard icon="R" label="Resolved/Closed" value={stats.resolved} color={C.green} bg={C.greenL}
-            active={filters.status === 'resolved' || filters.status === 'closed'} onClick={() => { setF('status', 'closed'); setTab('complaints'); }} />
-          <StatCard icon="X" label="Refused" value={stats.refused} color={C.red} bg={C.redL}
-            active={filters.status === 'refused'} onClick={() => { setF('status', 'refused'); setTab('complaints'); }} />
-        </div>
-
+      <div className="page-main" style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 20px' }}>
         {/* COMPLAINTS TAB */}
         {tab === 'complaints' && (
           <div className="fadeUp">
-            {categoryCounts.length > 0 && (
-              <Card style={{ padding: '16px 20px', marginBottom: 18 }}>
-                <div style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase', marginBottom: 10 }}>
-                  Browse by Category {filters.status ? `— ${STATUS_CFG[filters.status]?.label || filters.status} only` : ''}
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button onClick={() => setF('type', '')}
-                    style={{
-                      padding: '6px 14px', borderRadius: 99, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
-                      border: `1.5px solid ${filters.type === '' ? C.navy : C.border2}`,
-                      background: filters.type === '' ? C.navy : '#fff', color: filters.type === '' ? '#fff' : C.text2
-                    }}>All Categories</button>
-                  {categoryCounts.map(({ type, count }) => (
-                    <button key={type} onClick={() => setF('type', type)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: 99,
-                        cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
-                        border: `1.5px solid ${filters.type === type ? C.navy : C.border2}`,
-                        background: filters.type === type ? C.navy : '#fff', color: filters.type === type ? '#fff' : C.text2
-                      }}>
-                      <span>{TYPE_ICONS[type]}</span>{type}
-                      <span style={{
-                        background: filters.type === type ? 'rgba(255,255,255,0.25)' : C.goldL,
-                        color: filters.type === type ? '#fff' : C.navy, borderRadius: 99, padding: '1px 7px', fontSize: 11
-                      }}>{count}</span>
-                    </button>
-                  ))}
-                </div>
-              </Card>
-            )}
-            <Card style={{ padding: 22, marginBottom: 18 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
-                <div style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase' }}>
-                  Filter &amp; Search — showing: {filters.status ? (STATUS_CFG[filters.status]?.label || filters.status) : 'All statuses'}
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <Btn onClick={exportExcel} variant="outline" size="sm">Export Excel</Btn>
-                  <span style={{ fontSize: 12, color: C.muted, alignSelf: 'center', fontWeight: 600 }}>
-                    {filtered.length} of {scopedComplaints.length} records
-                  </span>
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: 10 }}>
-                <input value={filters.search} onChange={e => setF('search', e.target.value)}
-                  placeholder="Search name / ID / issue..."
-                  style={{ ...inputStyle, fontSize: 12, padding: '9px 12px', height: 40 }} />
-                <select value={filters.status} onChange={e => setF('status', e.target.value)} style={selectStyle}>
-                  <option value="">All Statuses</option>
-                  {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
-                <select value={filters.type} onChange={e => setF('type', e.target.value)} style={selectStyle}>
-                  <option value="">All Categories</option>
-                  {scopedTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <select value={filters.priority} onChange={e => setF('priority', e.target.value)} style={selectStyle}>
-                  <option value="">All Priorities</option>
-                  {Object.entries(PRIORITY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
-                <select value={filters.dept} onChange={e => setF('dept', e.target.value)} style={selectStyle}>
-                  <option value="">All Departments/Locations</option>
-                  {deptOptionsInScope.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-                <input type="date" value={filters.from} onChange={e => setF('from', e.target.value)}
-                  style={selectStyle} title="From date" />
-                <input type="date" value={filters.to} onChange={e => setF('to', e.target.value)}
-                  style={selectStyle} title="To date" />
-                <Btn onClick={() => { setFilters({ dept: '', type: '', status: '', priority: '', search: '', from: '', to: '' }); setVisibleCount(20); }}
-                  variant="ghost" size="sm" style={{ height: 40 }}>Clear</Btn>
-              </div>
-            </Card>
+            {(() => {
+              const segs = [
+                ['', 'All', stats.total, C.navy],
+                ['open', 'Open', stats.open, '#2563eb'],
+                ['hold', 'Processing', stats.hold, '#d97706'],
+                ['done', 'Resolved', stats.resolved, '#10b981'],
+                ['refused', 'Refused', stats.refused, '#ef4444'],
+              ];
+              const activeFilters = ['type', 'dept', 'priority', 'assign', 'from', 'to'].filter(k => filters[k]).length;
+              const seg = { display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 99, cursor: 'pointer', fontSize: 12.5, whiteSpace: 'nowrap' };
+              const vbtn = (k, label) => (
+                <button key={k} onClick={() => setViewMode(k)}
+                  style={{
+                    padding: '6px 14px', fontSize: 12.5, cursor: 'pointer', border: 'none', fontWeight: 600,
+                    background: viewMode === k ? C.navy : '#fff', color: viewMode === k ? '#fff' : C.text2
+                  }}>{label}</button>
+              );
+              return (
+                <Card style={{ padding: '12px 14px', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 190 }}>
+                      <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: C.muted, display: 'flex', pointerEvents: 'none' }}><SearchIcon /></span>
+                      <input value={filters.search} onChange={e => setF('search', e.target.value)}
+                        placeholder="Search name, ID or issue"
+                        style={{ ...inputStyle, paddingLeft: 36, height: 38, fontSize: 13 }} />
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {segs.map(([k, label, n, col]) => (
+                        <button key={label} onClick={() => setF('status', k)}
+                          style={{
+                            ...seg, border: `1px solid ${filters.status === k ? C.navy : C.border2}`,
+                            background: filters.status === k ? C.goldL : '#fff',
+                            color: filters.status === k ? C.navy : C.text2, fontWeight: filters.status === k ? 700 : 500
+                          }}>
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: col }} />
+                          {label}
+                          <span style={{ fontWeight: 700 }}>{n}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto', flexWrap: 'wrap' }}>
+                      <Btn onClick={() => setShowFilters(v => !v)} variant={showFilters ? 'soft' : 'ghost'} size="sm">
+                        Filters{activeFilters > 0 ? ` (${activeFilters})` : ''}
+                      </Btn>
+                      <div style={{ display: 'inline-flex', border: `1px solid ${C.border2}`, borderRadius: 8, overflow: 'hidden' }}>
+                        {vbtn('grid', 'Grid')}{vbtn('table', 'Table')}
+                      </div>
+                      <Btn onClick={exportExcel} variant="primary" size="sm">Export Excel</Btn>
+                    </div>
+                  </div>
+                  {showFilters && (
+                    <div className="slideDown" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: 10, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
+                      <select value={filters.type} onChange={e => setF('type', e.target.value)} style={selectStyle}>
+                        <option value="">All Categories</option>
+                        {scopedTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                      <select value={filters.dept} onChange={e => setF('dept', e.target.value)} style={selectStyle}>
+                        <option value="">All Departments / Locations</option>
+                        {deptOptionsInScope.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                      <select value={filters.priority} onChange={e => setF('priority', e.target.value)} style={selectStyle}>
+                        <option value="">All Priorities</option>
+                        {Object.entries(PRIORITY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                      </select>
+                      {perms.adminScope !== 'assigned' && (
+                        <select value={filters.assign} onChange={e => setF('assign', e.target.value)} style={selectStyle}>
+                          <option value="">All Allocations</option>
+                          <option value="unassigned">Not Assigned Yet</option>
+                          {filterTechnicians.map(t => <option key={t.username} value={t.username}>{t.displayName}</option>)}
+                        </select>
+                      )}
+                      <input type="date" value={filters.from} onChange={e => setF('from', e.target.value)} style={selectStyle} title="From date" />
+                      <input type="date" value={filters.to} onChange={e => setF('to', e.target.value)} style={selectStyle} title="To date" />
+                      <Btn onClick={() => { setFilters({ dept: '', type: '', status: '', priority: '', assign: '', search: '', from: '', to: '' }); setVisibleCount(20); }}
+                        variant="ghost" size="sm" style={{ height: 40 }}>Clear all</Btn>
+                    </div>
+                  )}
+                </Card>
+              );
+            })()}
+
+            <div style={{ fontSize: 12, color: C.muted, margin: '0 2px 10px' }}>
+              Showing {Math.min(filtered.length, visibleCount)} of {filtered.length} tickets{filtered.length !== scopedComplaints.length ? ` (total ${scopedComplaints.length})` : ''}
+            </div>
 
             {filtered.length === 0 ? (
               <Card style={{ textAlign: 'center', padding: 48 }}>
-                <div style={{ fontWeight: 600, color: C.muted }}>No tickets match your filters</div>
+                <div style={{ fontWeight: 600, color: C.muted }}>No tickets match the current view</div>
               </Card>
+            ) : viewMode === 'grid' ? (
+              <div className="ticket-grid">
+                {filtered.slice(0, visibleCount).map(c => <TicketGridCard key={c._docId || c.id} c={c} onOpen={setDetailModal} />)}
+              </div>
             ) : (
               <Card style={{ padding: 0, overflow: 'hidden' }}>
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', minWidth: 880, borderCollapse: 'collapse' }}>
+                  <table style={{ width: '100%', minWidth: 980, borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr style={{ background: C.off, borderBottom: `2px solid ${C.border}` }}>
-                        {['Priority', 'Ticket', 'Employee', 'Category', 'Department/Location', 'Status', 'Submitted', ''].map(h => (
-                          <th key={h} style={{
-                            textAlign: 'left', padding: '12px 16px', fontSize: 11, fontWeight: 700, color: C.muted,
-                            letterSpacing: .6, textTransform: 'uppercase', whiteSpace: 'nowrap'
-                          }}>{h}</th>
+                      <tr style={{ background: C.goldL, borderBottom: `1px solid ${C.border2}` }}>
+                        {['Ticket', 'Priority', 'Employee', 'Category', 'Department / Location', 'Status', 'Technician', 'Raised', ''].map(h => (
+                          <th key={h} style={{ textAlign: 'left', padding: '11px 14px', fontSize: 11, fontWeight: 700, color: C.navy, letterSpacing: .6, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {filtered.slice(0, visibleCount).map((c, i) => {
-                        const unresolved = c.status === 'open' || c.status === 'hold';
+                        const active = c.status === 'open' || c.status === 'hold';
+                        const sla = slaState(c, Date.now());
                         return (
                           <tr key={c._docId || c.id} onClick={() => setDetailModal(c)}
-                            style={{
-                              background: i % 2 === 0 ? '#fff' : C.off, borderBottom: `1px solid ${C.border}`,
-                              cursor: 'pointer', transition: 'background .12s'
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.background = C.blueL; }}
+                            style={{ background: i % 2 === 0 ? '#fff' : C.off, borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}
+                            onMouseEnter={e => { e.currentTarget.style.background = C.goldL; }}
                             onMouseLeave={e => { e.currentTarget.style.background = i % 2 === 0 ? '#fff' : C.off; }}>
-                            <td style={{ padding: '12px 16px' }}>
-                              <PriorityBadge priority={c.priority} unresolved={unresolved} />
+                            <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: C.navy, fontWeight: 700 }}>{c.id}</span>
                             </td>
-                            <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
-                              <span style={{
-                                fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: C.navy, fontWeight: 700,
-                                letterSpacing: .5, background: C.goldL, padding: '3px 9px', borderRadius: 6, border: `1px solid ${C.gold}`
-                              }}>{c.id}</span>
+                            <td style={{ padding: '11px 14px' }}><PriorityBadge priority={c.priority} /></td>
+                            <td style={{ padding: '11px 14px' }}>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{na(c.userName)}</div>
+                              <div style={{ fontSize: 11, color: C.muted }}>{na(c.empId)}</div>
                             </td>
-                            <td style={{ padding: '12px 16px' }}>
-                              <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{c.userName}</div>
-                              {c.empId && <div style={{ fontSize: 11, color: C.muted }}>{c.empId}</div>}
-                            </td>
-                            <td style={{ padding: '12px 16px', fontSize: 13, color: C.text2, whiteSpace: 'nowrap' }}>
-                              {TYPE_ICONS[c.type]} {c.type}
-                            </td>
-                            <td style={{ padding: '12px 16px', fontSize: 13, color: C.text2, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {c.dept}
-                            </td>
-                            <td style={{ padding: '12px 16px' }}>
+                            <td style={{ padding: '11px 14px', fontSize: 13, color: C.text2, whiteSpace: 'nowrap' }}>{typeKey(c.type)}</td>
+                            <td style={{ padding: '11px 14px', fontSize: 13, color: C.text2, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{na(c.dept)}</td>
+                            <td style={{ padding: '11px 14px' }}>
                               <Badge status={c.status} />
+                              {sla && <div style={{ fontSize: 10.5, color: '#b45309', fontWeight: 600, marginTop: 3 }}>Overdue {fmtSpan(sla.idle)}</div>}
                             </td>
-                            <td style={{ padding: '12px 16px', fontSize: 12, color: C.muted, whiteSpace: 'nowrap' }}>
-                              {fmtDT(c.at)}
+                            <td style={{ padding: '11px 14px', fontSize: 12.5, whiteSpace: 'nowrap', color: c.assignedToName ? C.text2 : C.muted, fontWeight: c.assignedToName ? 600 : 400 }}>
+                              {c.assignedToName || (active ? 'Not assigned' : 'N/A')}
                             </td>
-                            <td style={{ padding: '12px 16px' }} onClick={e => e.stopPropagation()}>
+                            <td style={{ padding: '11px 14px', fontSize: 12, color: C.muted, whiteSpace: 'nowrap' }}>{c.at ? fmtDT(c.at) : 'N/A'}</td>
+                            <td style={{ padding: '11px 14px' }} onClick={e => e.stopPropagation()}>
                               <Btn onClick={() => setDetailModal(c)} variant="outline" size="sm">View</Btn>
                             </td>
                           </tr>
@@ -2455,7 +3777,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
             {filtered.length > visibleCount && (
               <div style={{ textAlign: 'center', marginTop: 18 }}>
                 <Btn onClick={() => setVisibleCount(v => v + 20)} variant="outline" size="md">
-                  Load More ({filtered.length - visibleCount} remaining)
+                  Load more ({filtered.length - visibleCount} remaining)
                 </Btn>
               </div>
             )}
@@ -2465,6 +3787,17 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
         {/* ANALYTICS TAB */}
         {tab === 'analytics' && (
           <div className="fadeUp">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(165px,1fr))', gap: 12, marginBottom: 18 }}>
+              <KpiTile label="Total tickets" value={stats.total} color={C.navy} bg={C.goldL} note="All tickets in scope" />
+              <KpiTile label="Open" value={stats.open} color="#1d4ed8" bg="#eaf1ff" note="Awaiting action" />
+              <KpiTile label="Processing" value={stats.hold} color="#9a5b0b" bg="#fdf3df" note="Work in progress" />
+              <KpiTile label="Resolved / Closed" value={stats.resolved} color="#0f6b46" bg="#e6f6ee" note="Completed" />
+              <KpiTile label="Refused" value={stats.refused} color="#b42318" bg="#fdecea" note="Not taken forward" />
+              <KpiTile label="Resolution rate" value={`${kpiExtra.rate}%`} color={kpiExtra.rate >= 80 ? '#0f6b46' : kpiExtra.rate >= 50 ? '#9a5b0b' : '#b42318'} bg={kpiExtra.rate >= 80 ? '#e6f6ee' : kpiExtra.rate >= 50 ? '#fdf3df' : '#fdecea'} note="Resolved of total" />
+              <KpiTile label="Avg resolution time" value={kpiExtra.avg} color={C.navy} bg={C.goldL} note="Raised to resolved" />
+              <KpiTile label="Overdue" value={kpiExtra.overdue} color={kpiExtra.overdue ? '#b42318' : '#0f6b46'} bg={kpiExtra.overdue ? '#fdecea' : '#e6f6ee'} note="No update past SLA" />
+            </div>
+            <AiInsightsPanel rows={scopedComplaints} techs={technicians} />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }} className="grid-2">
               <Card style={{ padding: 24 }}>
                 <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 18, color: C.text, fontFamily: "'Poppins',sans-serif" }}>Monthly Trend</div>
@@ -2504,7 +3837,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                       <Pie data={typeData} cx="50%" cy="50%" outerRadius={100} innerRadius={50}
                         dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                         labelLine={false} fontSize={11}>
-                        {typeData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                        {typeData.map((_, i) => <Cell key={i} fill={chartColors()[i % chartColors().length]} />)}
                       </Pie>
                       <Tooltip contentStyle={{ borderRadius: 10, fontSize: 12 }} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -2543,7 +3876,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                 <div style={{ fontWeight: 700, fontSize: 17, color: C.text, fontFamily: "'Poppins',sans-serif" }}>User Management</div>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <span style={{ fontSize: 12, color: C.muted, fontWeight: 600, alignSelf: 'center' }}>{filteredUsers.length} users</span>
-                  <Btn onClick={() => { setAddUserModal(true); setAddUserError(''); setNewUser({ username: '', displayName: '', password: '', userType: 'employee', alsoEmployee: false, adminCategories: [] }); }}
+                  <Btn onClick={() => { setAddUserModal(true); setAddUserError(''); setNewUser({ username: '', displayName: '', password: '', userType: 'employee', alsoEmployee: false, adminCategories: [], headUsernames: [] }); }}
                     variant="primary" size="sm">Add User</Btn>
                 </div>
               </div>
@@ -2560,7 +3893,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                         <div style={{
                           width: 42, height: 42, borderRadius: 12,
-                          background: up.isFullAdmin ? `linear-gradient(135deg,${C.gold},#b8860b)` : up.isAdmin ? `linear-gradient(135deg,#7c3aed,#5b21b6)` : `linear-gradient(135deg,${C.navy},#1a3a6b)`,
+                          background: up.isFullAdmin ? C.navy : up.isAdmin ? '#3b4a6b' : '#64748b',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           fontSize: 16, color: '#fff', fontWeight: 700, flexShrink: 0
                         }}>
@@ -2573,12 +3906,17 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                       </div>
                       <span style={{
                         fontSize: 10, padding: '3px 9px', borderRadius: 99, fontWeight: 700,
-                        background: up.isFullAdmin ? C.goldL : up.isAdmin ? '#f3e8ff' : C.blueL,
-                        color: up.isFullAdmin ? '#7c2d12' : up.isAdmin ? '#5b21b6' : C.blue, letterSpacing: .3, textTransform: 'uppercase'
+                        background: C.goldL, border: `1px solid ${C.border}`,
+                        color: C.text2, letterSpacing: .3, textTransform: 'uppercase'
                       }}>
                         {roleSummaryLabel(up)}
                       </span>
                     </div>
+                    {up.isTechnician && (
+                      <div style={{ fontSize: 11, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+                        Reports to: <strong style={{ color: C.text2 }}>{up.headUsernames.map(hu => (users.find(x => safeLC(x.username) === safeLC(hu)) || {}).displayName || hu).join(', ') || 'not set'}</strong>
+                      </div>
+                    )}
                     {up.isAdmin && up.adminScope === 'categories' && (
                       <div style={{ fontSize: 11, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
                         Categories: <strong style={{ color: C.text2 }}>{up.adminCategories.join(', ') || 'none selected'}</strong>
@@ -2605,132 +3943,139 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
             )}
           </div>
         )}
+        {tab === 'logs' && perms.adminScope === 'all' && <LogsPanel />}
       </div>
 
-      {/* Detail Modal */}
-      <Modal open={!!detailModal} onClose={() => setDetailModal(null)}
-        title={`${detailModal?.id} — Full Details`} width={640}>
+      {/* Ticket window — large dialog, navbar stays */}
+      <Modal open={!!detailModal} onClose={() => setDetailModal(null)} fullscreen
+        title={detailModal ? `Ticket ${detailModal.id}  |  ${typeKey(detailModal.type)}` : ''}>
         {detailModal && (
+          <TicketDetailView ticket={detailModal} viewer={perms.adminScope === 'assigned' ? 'technician' : 'head'}
+            sideActions={<>{getActionButtons(detailModal)}</>}
+            mainExtra={(detailModal.status === 'resolved' || detailModal.status === 'closed') ? (
+              <SectionCard title="Employee Feedback">
+                {(() => {
+                  const r = RATING_OPTIONS.find(x => x.key === detailModal.rating);
+                  return r ? (
+                    <span style={{
+                      display: 'inline-flex', padding: '6px 16px', borderRadius: 99, fontSize: 13, fontWeight: 600,
+                      border: `1.5px solid ${r.color}`, background: `${r.color}18`, color: r.color
+                    }}>{r.label}</span>
+                  ) : <div style={{ fontSize: 13, color: C.muted }}>Rating: N/A</div>;
+                })()}
+                <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.6, marginTop: 10 }}>
+                  <span style={{ color: C.muted }}>Remark: </span>{na(detailModal.ratingRemark)}
+                </div>
+              </SectionCard>
+            ) : null} />
+        )}
+      </Modal>
+
+      {/* Assign / Reassign Modal */}
+      <Modal open={!!assignModal} onClose={() => setAssignModal(null)}
+        title={assignModal && assignModal.assignedTo ? 'Reassign Ticket' : 'Assign to Technician'} width={480}>
+        {assignModal && (
           <div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }} className="grid-2">
-              {[
-                ['Ticket ID', detailModal.id, C.navy, true],
-                ['Status', STATUS_CFG[detailModal.status]?.label, STATUS_CFG[detailModal.status]?.color, false],
-                ['Priority', (PRIORITY_CFG[detailModal.priority] || PRIORITY_CFG[DEFAULT_PRIORITY]).label, (PRIORITY_CFG[detailModal.priority] || PRIORITY_CFG[DEFAULT_PRIORITY]).color, false],
-                ['Employee', detailModal.userName, C.text, false],
-                ['Employee ID', detailModal.empId || '—', C.text, false],
-                ['Department/Location', detailModal.dept, C.text, false],
-                ['Category', detailModal.type, C.text, false],
-                ['Submitted', fmtDT(detailModal.at), C.muted, false],
-                ...(detailModal.status === 'resolved' || detailModal.status === 'closed' ? [
-                  ['Resolved By', detailModal.actionBy || '—', C.green, false],
-                  ['Resolved At', fmtDT(detailModal.actionAt) || '—', C.green, false],
-                  ['Time Taken to Resolve', getDuration(detailModal.at, detailModal.actionAt), C.green, true],
-                ] : [])
-              ].map(([k, v, c, mono]) => (
-                <div key={k} style={{ background: C.off, borderRadius: 10, padding: '10px 14px', border: `1px solid ${C.border}` }}>
-                  <div style={{ fontSize: 10, color: C.muted, fontWeight: 700, letterSpacing: .6, marginBottom: 4, textTransform: 'uppercase' }}>{k}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: c, fontFamily: mono ? "'JetBrains Mono',monospace" : 'inherit' }}>{v}</div>
-                </div>
-              ))}
+            <div style={{ background: C.off, borderRadius: 10, padding: '10px 14px', marginBottom: 16, border: `1px solid ${C.border}` }}>
+              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: C.navy, fontWeight: 700 }}>{assignModal.id}</div>
+              <div style={{ fontSize: 13, color: C.text2, marginTop: 4 }}>{assignModal.type} · {assignModal.dept}</div>
+              {assignModal.assignedToName && (
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>Currently with: <strong style={{ color: C.text2 }}>{assignModal.assignedToName}</strong></div>
+              )}
             </div>
-            <div style={{ background: C.off, borderRadius: 10, padding: '12px 14px', marginBottom: 18, border: `1px solid ${C.border}` }}>
-              <div style={{ fontSize: 10, color: C.muted, fontWeight: 700, letterSpacing: .6, marginBottom: 6, textTransform: 'uppercase' }}>Issue Description</div>
-              <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.7 }}>{detailModal.desc}</div>
-            </div>
-            {detailModal.solution && (
-              <div style={{ background: C.greenL, borderRadius: 10, padding: '12px 14px', marginBottom: 18, border: `1px solid #a7f3d0` }}>
-                <div style={{ fontSize: 10, color: C.green, fontWeight: 700, letterSpacing: .6, marginBottom: 6, textTransform: 'uppercase' }}>Solution</div>
-                <div style={{ fontSize: 13, color: C.green, lineHeight: 1.6 }}>{detailModal.solution}</div>
-              </div>
-            )}
-            {detailModal.holdReason && detailModal.status === 'hold' && (
-              <div style={{ background: C.yellowL, borderRadius: 10, padding: '12px 14px', marginBottom: 18, border: `1px solid #fde68a` }}>
-                <div style={{ fontSize: 10, color: C.yellow, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Processing Note</div>
-                <div style={{ fontSize: 13, color: C.yellow }}>{detailModal.holdReason}</div>
-              </div>
-            )}
-            <div style={{ fontSize: 11, color: C.muted, fontWeight: 700, marginBottom: 14, letterSpacing: .6, textTransform: 'uppercase' }}>Timeline</div>
-            <Timeline history={detailModal.history} />
-
-            {(detailModal.status === 'resolved' || detailModal.status === 'closed') && (
-              <div style={{ marginTop: 20, paddingTop: 18, borderTop: `1px solid ${C.border}` }}>
-                <div style={{ fontSize: 11, color: C.muted, fontWeight: 700, marginBottom: 10, letterSpacing: .6, textTransform: 'uppercase' }}>
-                  Employee Satisfaction Rating
+            {(() => {
+              const rec = recommendTechnician(myTechnicians, complaints, assignModal);
+              if (!rec || myTechnicians.length < 2) return null;
+              return (
+                <div style={{ background: C.goldL, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '10px 12px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <AiBadge />
+                  <span style={{ fontSize: 12.5, color: C.text2, flex: 1, minWidth: 160 }}>
+                    Recommended: <strong>{rec.tech.displayName}</strong> ({rec.active} active, {rec.similar} similar resolved)
+                  </span>
+                  <Btn onClick={() => setAssignForm(f => ({ ...f, tech: rec.tech.username }))} variant="outline" size="sm">Use</Btn>
                 </div>
-                {detailModal.rating ? (
-                  <div style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 99,
-                    fontSize: 13, fontWeight: 700,
-                    border: `2px solid ${RATING_OPTIONS.find(r => r.key === detailModal.rating)?.color || C.border}`,
-                    background: `${RATING_OPTIONS.find(r => r.key === detailModal.rating)?.color || C.muted}18`,
-                    color: RATING_OPTIONS.find(r => r.key === detailModal.rating)?.color || C.text2
-                  }}>
-                    {RATING_OPTIONS.find(r => r.key === detailModal.rating)?.label || detailModal.rating}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 13, color: C.muted, fontStyle: 'italic' }}>Not rated yet by the employee.</div>
-                )}
-                {detailModal.ratingRemark && (
-                  <div style={{ background: C.off, borderRadius: 10, padding: '10px 14px', marginTop: 10, border: `1px solid ${C.border}` }}>
-                    <div style={{ fontSize: 10, color: C.muted, fontWeight: 700, letterSpacing: .6, marginBottom: 4, textTransform: 'uppercase' }}>Employee Remark</div>
-                    <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.6 }}>{detailModal.ratingRemark}</div>
-                  </div>
-                )}
-                <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
-                  This is set by the employee from their own portal — you can also print the slip below and collect it on paper.
-                </div>
-              </div>
-            )}
-
-            <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {/* Single Print action lives inside getActionButtons for resolved/closed tickets — no duplicate button here. */}
-              {getActionButtons(detailModal, true)}
-              <Btn onClick={() => { setDeleteConfirm(detailModal); setDetailModal(null); }} variant="danger" size="sm">Delete</Btn>
+              );
+            })()}
+            <div style={{ marginBottom: 16 }}>
+              <FieldLabel required>Technician</FieldLabel>
+              {myTechnicians.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: C.muted }}>No technicians are mapped to you.</div>
+              ) : (
+                <select value={assignForm.tech} onChange={e => setAssignForm(f => ({ ...f, tech: e.target.value }))} style={inputStyle}>
+                  <option value="">Select technician</option>
+                  {myTechnicians.map(t => {
+                    const active = complaints.filter(x => safeLC(x.assignedTo) === safeLC(t.username) && (x.status === 'open' || x.status === 'hold')).length;
+                    return <option key={t.username} value={t.username}>{t.displayName} ({active} active)</option>;
+                  })}
+                </select>
+              )}
             </div>
+            <div style={{ marginBottom: 16 }}>
+              <FieldLabel>Instruction for technician (optional)</FieldLabel>
+              <textarea value={assignForm.note} onChange={e => setAssignForm(f => ({ ...f, note: e.target.value }))}
+                rows={2} placeholder="e.g. Please check today before 3 PM" style={{ ...inputStyle, resize: 'vertical' }} />
+            </div>
+            {assignError && (
+              <div style={{ background: C.redL, border: '1px solid #fca5a5', borderRadius: 9, padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 14 }}>{assignError}</div>
+            )}
+            <Btn onClick={doAssign} variant="primary" size="md" style={{ width: '100%' }} disabled={myTechnicians.length === 0}>Confirm Allocation</Btn>
           </div>
         )}
       </Modal>
 
       {/* Action Modal */}
       <Modal open={!!actionModal} onClose={() => setActionModal(null)}
-        title={actionType === 'resolve' ? 'Resolve Ticket' : actionType === 'hold' ? 'Mark as Processing' : actionType === 'refuse' ? 'Refuse Ticket' : 'Close Ticket'}
+        title={actionType === 'resolve' ? 'Resolve Ticket' : actionType === 'hold' ? (perms.adminScope === 'assigned' ? 'Post Update' : 'Mark as Processing') : actionType === 'refuse' ? 'Refuse Ticket' : 'Close Ticket'}
         width={480}>
         {actionModal && (
           <div>
             <div style={{ background: C.off, borderRadius: 10, padding: '10px 14px', marginBottom: 18, border: `1px solid ${C.border}` }}>
-              <div style={{ fontSize: 11, color: C.muted, fontWeight: 700 }}>TICKET</div>
+              <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>Ticket</div>
               <div style={{ fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: C.navy }}>{actionModal.id}</div>
               <div style={{ fontSize: 12, color: C.text2, marginTop: 2 }}>{actionModal.userName} · {actionModal.dept}</div>
             </div>
             {actionType === 'resolve' && (
               <>
-                <div style={{ background: C.blueL, borderRadius: 8, padding: '9px 13px', marginBottom: 16, fontSize: 12, color: C.blue }}>
-                  Marking this as resolved will automatically close the ticket.
-                </div>
                 <div style={{ marginBottom: 16 }}>
-                  <FieldLabel required>Resolved By (Technician Name)</FieldLabel>
+                  <FieldLabel required>Resolved by</FieldLabel>
                   <input value={actionForm.actionBy} onChange={e => af('actionBy', e.target.value)}
-                    placeholder="Enter technician name" style={inputStyle} />
+                    placeholder="Name" style={inputStyle} />
                 </div>
+                {(() => {
+                  const sug = suggestSolutions(complaints, actionModal);
+                  if (!sug.length) return null;
+                  return (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <AiBadge /><span style={{ fontSize: 12, color: C.muted }}>Suggested actions from similar tickets</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {sug.map(txt => (
+                          <button key={txt} onClick={() => af('solution', txt)} className="menu-item"
+                            style={{ padding: '5px 11px', borderRadius: 99, border: `1px solid ${C.border2}`, background: '#fff', color: C.text2, fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>{txt}</button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div style={{ marginBottom: 18 }}>
-                  <FieldLabel required>Solution / Action Taken</FieldLabel>
+                  <FieldLabel required>Action taken</FieldLabel>
                   <textarea value={actionForm.solution} onChange={e => af('solution', e.target.value)}
-                    rows={3} placeholder="Describe what was done to fix the issue..."
+                    rows={3} placeholder="Describe the action taken"
                     style={{ ...inputStyle, resize: 'vertical' }} />
                 </div>
-                <Btn onClick={doAction} variant="success" size="md" style={{ width: '100%' }}>Mark as Resolved &amp; Close</Btn>
+                <Btn onClick={doAction} variant="success" size="md" style={{ width: '100%' }}>Resolve and Close</Btn>
               </>
             )}
             {actionType === 'hold' && (
               <>
                 <div style={{ marginBottom: 18 }}>
-                  <FieldLabel required>Reason for Processing</FieldLabel>
+                  <FieldLabel required>{perms.adminScope === 'assigned' ? 'Update for the employee' : 'Remarks'}</FieldLabel>
                   <textarea value={actionForm.reason} onChange={e => af('reason', e.target.value)}
-                    rows={3} placeholder="Why is this ticket being processed? (e.g., waiting for parts, vendor support needed...)"
+                    rows={3} placeholder="Current status of the work"
                     style={{ ...inputStyle, resize: 'vertical' }} />
                 </div>
-                <Btn onClick={doAction} variant="warning" size="md" style={{ width: '100%' }}>Mark as Processing</Btn>
+                <Btn onClick={doAction} variant="primary" size="md" style={{ width: '100%' }}>{perms.adminScope === 'assigned' ? 'Post Update' : 'Mark as Processing'}</Btn>
               </>
             )}
             {actionType === 'refuse' && (
@@ -2738,41 +4083,22 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                 <div style={{ marginBottom: 18 }}>
                   <FieldLabel required>Reason for Refusal</FieldLabel>
                   <textarea value={actionForm.reason} onChange={e => af('reason', e.target.value)}
-                    rows={3} placeholder="Why is this ticket being refused?"
+                    rows={3} placeholder="Reason for refusal"
                     style={{ ...inputStyle, resize: 'vertical' }} />
                 </div>
-                <Btn onClick={doAction} variant="danger" size="md" style={{ width: '100%' }}>Refuse Ticket</Btn>
+                <Btn onClick={doAction} variant="primary" size="md" style={{ width: '100%' }}>Refuse Ticket</Btn>
               </>
             )}
             {actionType === 'close' && (
               <>
                 <div style={{ marginBottom: 18 }}>
-                  <FieldLabel>Closing Note (Optional)</FieldLabel>
+                  <FieldLabel>Closing note</FieldLabel>
                   <textarea value={actionForm.reason} onChange={e => af('reason', e.target.value)}
-                    rows={3} placeholder="Any final note before closing..." style={{ ...inputStyle, resize: 'vertical' }} />
+                    rows={3} placeholder="Closing note" style={{ ...inputStyle, resize: 'vertical' }} />
                 </div>
                 <Btn onClick={doAction} variant="ghost" size="md" style={{ width: '100%' }}>Close Ticket</Btn>
               </>
             )}
-          </div>
-        )}
-      </Modal>
-
-      {/* Delete Confirm Modal */}
-      <Modal open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Ticket" width={400}>
-        {deleteConfirm && (
-          <div>
-            <div style={{ background: C.redL, borderRadius: 12, padding: 18, marginBottom: 18, textAlign: 'center' }}>
-              <div style={{ fontWeight: 700, color: C.red, fontSize: 16, marginBottom: 6 }}>Confirm Deletion</div>
-              <div style={{ color: C.red, fontSize: 13, lineHeight: 1.6 }}>
-                Permanently delete <strong>{deleteConfirm.id}</strong>?<br />
-                <span style={{ fontSize: 12, opacity: .8 }}>This cannot be undone.</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <Btn onClick={() => setDeleteConfirm(null)} variant="ghost" size="md" style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={() => handleDelete(deleteConfirm)} variant="danger" size="md" style={{ flex: 1 }}>Delete Permanently</Btn>
-            </div>
           </div>
         )}
       </Modal>
@@ -2809,58 +4135,14 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
             <FieldLabel required>Display Name</FieldLabel>
             <input value={newUser.displayName} onChange={e => nu('displayName', e.target.value)}
               placeholder="e.g. John Doe" style={inputStyle} />
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>This is what shows up everywhere in the portal — make sure it's their actual name, not a password or code.</div>
           </div>
           <div style={{ marginBottom: 16 }}>
             <FieldLabel required>Password</FieldLabel>
-            <input type="password" value={newUser.password} onChange={e => nu('password', e.target.value)}
+            <SecretInput value={newUser.password} onChange={e => nu('password', e.target.value)}
               placeholder="Min 3 characters" style={inputStyle} />
           </div>
 
-          <div style={{ marginBottom: 16, background: C.off, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 }}>
-            <FieldLabel>User Type</FieldLabel>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: C.text2, marginBottom: 10, cursor: 'pointer' }}>
-              <input type="radio" style={{ marginTop: 3 }} checked={newUser.userType === 'employee'} onChange={() => nu('userType', 'employee')} />
-              <span><strong>Employee</strong> — can only raise their own tickets. No admin portal access at all.</span>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: C.text2, marginBottom: 10, cursor: 'pointer' }}>
-              <input type="radio" style={{ marginTop: 3 }} checked={newUser.userType === 'categoryAdmin'} onChange={() => nu('userType', 'categoryAdmin')} />
-              <span><strong>Category Admin</strong> — manages (resolve/process/refuse) only the ticket categories you pick below, sees reports for only those categories. Cannot add/remove users or change anyone's access.</span>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: C.text2, marginBottom: 4, cursor: 'pointer' }}>
-              <input type="radio" style={{ marginTop: 3 }} checked={newUser.userType === 'fullAdmin'} onChange={() => nu('userType', 'fullAdmin')} />
-              <span><strong>Full Admin</strong> — sees and manages every category, every department, plus can add/remove users and grant access. Only give this to trusted people.</span>
-            </label>
-
-            {(newUser.userType === 'categoryAdmin' || newUser.userType === 'fullAdmin') && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: C.text2, margin: '12px 0 0', paddingTop: 12, borderTop: `1px solid ${C.border}`, cursor: 'pointer' }}>
-                <input type="checkbox" checked={newUser.alsoEmployee} onChange={e => nu('alsoEmployee', e.target.checked)} />
-                Also give Employee access — this person can raise their own tickets too, and gets a "Switch view" button.
-              </label>
-            )}
-
-            {newUser.userType === 'categoryAdmin' && (
-              <div className="fadeIn" style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: C.text2, marginBottom: 8 }}>Which categories can they manage?</div>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                  <button type="button" onClick={() => nu('adminCategories', [...COMPLAINT_TYPES])}
-                    style={{ fontSize: 11, background: 'none', border: `1px solid ${C.border2}`, borderRadius: 6, padding: '3px 9px', cursor: 'pointer', color: C.navy }}>Select All</button>
-                  <button type="button" onClick={() => nu('adminCategories', [])}
-                    style={{ fontSize: 11, background: 'none', border: `1px solid ${C.border2}`, borderRadius: 6, padding: '3px 9px', cursor: 'pointer', color: C.muted }}>Clear</button>
-                  <span style={{ fontSize: 11, color: C.muted, alignSelf: 'center' }}>{newUser.adminCategories.length} selected</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 6, maxHeight: 200, overflow: 'auto', background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 }}>
-                  {COMPLAINT_TYPES.map(t => (
-                    <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.text2, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={newUser.adminCategories.includes(t)}
-                        onChange={() => toggleCategoryIn(v => nu('adminCategories', v), newUser.adminCategories, t)} />
-                      {TYPE_ICONS[t]} {t}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <UserTypeFields form={newUser} set={nu} headOptions={headOptions} />
 
           {addUserError && (
             <div style={{
@@ -2885,53 +4167,9 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
               <FieldLabel required>Display Name</FieldLabel>
               <input value={permForm.displayName} onChange={e => pf('displayName', e.target.value)}
                 placeholder="e.g. John Doe" style={inputStyle} />
-              <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>This is what shows up everywhere in the portal (top bar, ticket lists, reports) — fix it here if it was entered wrong (e.g. a password or number instead of the person's name).</div>
             </div>
 
-            <div style={{ marginBottom: 16, background: C.off, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 }}>
-              <FieldLabel>User Type</FieldLabel>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: C.text2, marginBottom: 10, cursor: 'pointer' }}>
-                <input type="radio" style={{ marginTop: 3 }} checked={permForm.userType === 'employee'} onChange={() => pf('userType', 'employee')} />
-                <span><strong>Employee</strong> — can only raise their own tickets. No admin portal access at all.</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: C.text2, marginBottom: 10, cursor: 'pointer' }}>
-                <input type="radio" style={{ marginTop: 3 }} checked={permForm.userType === 'categoryAdmin'} onChange={() => pf('userType', 'categoryAdmin')} />
-                <span><strong>Category Admin</strong> — manages (resolve/process/refuse) only the ticket categories you pick below, sees reports for only those categories. Cannot add/remove users or change anyone's access.</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: C.text2, marginBottom: 4, cursor: 'pointer' }}>
-                <input type="radio" style={{ marginTop: 3 }} checked={permForm.userType === 'fullAdmin'} onChange={() => pf('userType', 'fullAdmin')} />
-                <span><strong>Full Admin</strong> — sees and manages every category, every department, plus can add/remove users and grant access. Only give this to trusted people.</span>
-              </label>
-
-              {(permForm.userType === 'categoryAdmin' || permForm.userType === 'fullAdmin') && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: C.text2, margin: '12px 0 0', paddingTop: 12, borderTop: `1px solid ${C.border}`, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={permForm.alsoEmployee} onChange={e => pf('alsoEmployee', e.target.checked)} />
-                  Also give Employee access — this person can raise their own tickets too, and gets a "Switch view" button.
-                </label>
-              )}
-
-              {permForm.userType === 'categoryAdmin' && (
-                <div className="fadeIn" style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: C.text2, marginBottom: 8 }}>Which categories can they manage?</div>
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                    <button type="button" onClick={() => pf('adminCategories', [...COMPLAINT_TYPES])}
-                      style={{ fontSize: 11, background: 'none', border: `1px solid ${C.border2}`, borderRadius: 6, padding: '3px 9px', cursor: 'pointer', color: C.navy }}>Select All</button>
-                    <button type="button" onClick={() => pf('adminCategories', [])}
-                      style={{ fontSize: 11, background: 'none', border: `1px solid ${C.border2}`, borderRadius: 6, padding: '3px 9px', cursor: 'pointer', color: C.muted }}>Clear</button>
-                    <span style={{ fontSize: 11, color: C.muted, alignSelf: 'center' }}>{permForm.adminCategories.length} selected</span>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 6, maxHeight: 200, overflow: 'auto', background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 }}>
-                    {COMPLAINT_TYPES.map(t => (
-                      <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.text2, cursor: 'pointer' }}>
-                        <input type="checkbox" checked={permForm.adminCategories.includes(t)}
-                          onChange={() => toggleCategoryIn(v => pf('adminCategories', v), permForm.adminCategories, t)} />
-                        {TYPE_ICONS[t]} {t}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <UserTypeFields form={permForm} set={pf} headOptions={headOptions} />
 
             {permError && (
               <div style={{
@@ -2948,12 +4186,12 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
       <Modal open={pwModal} onClose={() => setPwModal(false)} title="Change Password" width={400}>
         <div style={{ marginBottom: 16 }}>
           <FieldLabel>New Password</FieldLabel>
-          <input type="password" value={newAdminPw.pw1} onChange={e => setNewAdminPw(s => ({ ...s, pw1: e.target.value }))}
+          <SecretInput value={newAdminPw.pw1} onChange={e => setNewAdminPw(s => ({ ...s, pw1: e.target.value }))}
             placeholder="Min 3 characters" style={inputStyle} />
         </div>
         <div style={{ marginBottom: 18 }}>
           <FieldLabel>Confirm Password</FieldLabel>
-          <input type="password" value={newAdminPw.pw2} onChange={e => setNewAdminPw(s => ({ ...s, pw2: e.target.value }))}
+          <SecretInput value={newAdminPw.pw2} onChange={e => setNewAdminPw(s => ({ ...s, pw2: e.target.value }))}
             placeholder="Re-enter password" style={inputStyle} />
         </div>
         <Btn onClick={changeAdminPw} variant="primary" size="md" style={{ width: '100%' }}>Change Password</Btn>
@@ -2970,7 +4208,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
             </div>
             <div style={{ marginBottom: 18 }}>
               <FieldLabel required>New Password</FieldLabel>
-              <input type="password" value={newPwForUser} onChange={e => setNewPwForUser(e.target.value)}
+              <SecretInput value={newPwForUser} onChange={e => setNewPwForUser(e.target.value)}
                 placeholder="Enter new password" style={inputStyle} />
             </div>
             <div style={{ background: C.yellowL, borderRadius: 8, padding: '9px 13px', marginBottom: 16, fontSize: 12, color: C.yellow }}>
@@ -2980,6 +4218,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
           </div>
         )}
       </Modal>
+      <TicketAssistant tickets={scopedComplaints} viewer={perms.adminScope === 'assigned' ? 'technician' : 'head'} me={user} />
     </div>
   );
 }
@@ -2987,7 +4226,142 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
 // ══════════════════════════════════════════════════════════════
 //  ROOT APP
 // ══════════════════════════════════════════════════════════════
-function AppInner() {
+
+// ══════════════════════════════════════════════════════════════
+//  LOGS PANEL (Full Admin only)
+// ══════════════════════════════════════════════════════════════
+function LogsPanel() {
+  const [logs, setLogs] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [lf, setLf] = useState({ type: '', search: '', from: '', to: '' });
+  const [visible, setVisible] = useState(50);
+  const setF2 = (k, v) => { setLf(s => ({ ...s, [k]: v })); setVisible(50); };
+
+  useEffect(() => {
+    const unsub = Logger.subscribe(rows => { setLogs(rows); setLoaded(true); }, 1000);
+    return () => unsub();
+  }, []);
+
+  const filtered = useMemo(() => logs.filter(l => {
+    if (lf.type && l.type !== lf.type) return false;
+    if (lf.from && new Date(l.at) < new Date(lf.from)) return false;
+    if (lf.to && new Date(l.at) > new Date(lf.to + 'T23:59:59')) return false;
+    if (lf.search) {
+      const s = lf.search.toLowerCase();
+      if (![l.action, l.actor, l.actorName, l.ticketId, l.target, l.details].some(v => safeLC(v).includes(s))) return false;
+    }
+    return true;
+  }), [logs, lf]);
+
+  const counts = useMemo(() => {
+    const r = {};
+    logs.forEach(l => { r[l.type] = (r[l.type] || 0) + 1; });
+    return r;
+  }, [logs]);
+
+  const exportLogs = () => {
+    const wb = buildLogReport(filtered);
+    XLSX.writeFile(wb, `CHRC_IDAR_Activity_Log${lf.type ? '_' + lf.type : ''}_${xlTick()}.xlsx`);
+  };
+
+  const sel = { ...inputStyle, fontSize: 12, padding: '9px 12px', height: 40 };
+
+  return (
+    <div className="fadeUp">
+      <Card style={{ padding: '16px 20px', marginBottom: 18 }}>
+        <div style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase', marginBottom: 10 }}>
+          Log Type
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => setF2('type', '')}
+            style={{
+              padding: '6px 14px', borderRadius: 99, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+              border: `1.5px solid ${lf.type === '' ? C.navy : C.border2}`,
+              background: lf.type === '' ? C.navy : '#fff', color: lf.type === '' ? '#fff' : C.text2
+            }}>All Logs ({logs.length})</button>
+          {Object.entries(LOG_TYPES).filter(([k]) => k !== 'chat' || (counts.chat || 0) > 0).map(([k, v]) => (
+            <button key={k} onClick={() => setF2('type', k)}
+              style={{
+                padding: '6px 14px', borderRadius: 99, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+                border: `1.5px solid ${lf.type === k ? C.navy : C.border2}`,
+                background: lf.type === k ? C.navy : '#fff', color: lf.type === k ? '#fff' : C.text2
+              }}>{v.label} ({counts[k] || 0})</button>
+          ))}
+        </div>
+      </Card>
+
+      <Card style={{ padding: 22, marginBottom: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase' }}>
+            Activity Logs — latest 1000 entries, read-only
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Btn onClick={exportLogs} variant="outline" size="sm">Export Excel</Btn>
+            <span style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>{filtered.length} of {logs.length} entries</span>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: 10 }}>
+          <input value={lf.search} onChange={e => setF2('search', e.target.value)}
+            placeholder="Search user / ticket / action..." style={sel} />
+          <input type="date" value={lf.from} onChange={e => setF2('from', e.target.value)} style={sel} title="From date" />
+          <input type="date" value={lf.to} onChange={e => setF2('to', e.target.value)} style={sel} title="To date" />
+          <Btn onClick={() => { setLf({ type: '', search: '', from: '', to: '' }); setVisible(50); }} variant="ghost" size="sm" style={{ height: 40 }}>Clear</Btn>
+        </div>
+      </Card>
+
+      {!loaded ? (
+        <Card style={{ textAlign: 'center', padding: 48 }}><div style={{ color: C.muted }}>Loading logs...</div></Card>
+      ) : filtered.length === 0 ? (
+        <Card style={{ textAlign: 'center', padding: 48 }}><div style={{ fontWeight: 600, color: C.muted }}>No log entries match your filters</div></Card>
+      ) : (
+        <Card style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: C.off, borderBottom: `2px solid ${C.border}` }}>
+                  {['Time', 'Type', 'Action', 'By', 'Ticket', 'Target', 'Details'].map(h => (
+                    <th key={h} style={{
+                      textAlign: 'left', padding: '12px 16px', fontSize: 11, fontWeight: 700, color: C.muted,
+                      letterSpacing: .6, textTransform: 'uppercase', whiteSpace: 'nowrap'
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.slice(0, visible).map((l, i) => {
+                  const t = LOG_TYPES[l.type] || { label: l.type, color: C.muted, bg: C.off };
+                  return (
+                    <tr key={l._id} style={{ background: i % 2 === 0 ? '#fff' : C.off, borderBottom: `1px solid ${C.border}` }}>
+                      <td style={{ padding: '10px 16px', fontSize: 12, color: C.muted, whiteSpace: 'nowrap' }}>{fmtDT(l.at)}</td>
+                      <td style={{ padding: '10px 16px' }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 99, background: t.bg, color: t.color, whiteSpace: 'nowrap' }}>{t.label}</span>
+                      </td>
+                      <td style={{ padding: '10px 16px', fontSize: 12, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono',monospace", whiteSpace: 'nowrap' }}>{l.action}</td>
+                      <td style={{ padding: '10px 16px', fontSize: 12.5, color: C.text2, whiteSpace: 'nowrap' }}>
+                        {l.actorName || l.actor}
+                        {l.actorName && <div style={{ fontSize: 10.5, color: C.muted }}>{l.actor}</div>}
+                      </td>
+                      <td style={{ padding: '10px 16px', fontSize: 12, color: C.navy, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", whiteSpace: 'nowrap' }}>{na(l.ticketId)}</td>
+                      <td style={{ padding: '10px 16px', fontSize: 12, color: C.text2, whiteSpace: 'nowrap' }}>{na(l.target)}</td>
+                      <td style={{ padding: '10px 16px', fontSize: 12, color: C.text2, maxWidth: 360 }}>{na(l.details)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+      {filtered.length > visible && (
+        <div style={{ textAlign: 'center', marginTop: 18 }}>
+          <Btn onClick={() => setVisible(v => v + 50)} variant="outline" size="md">Load More ({filtered.length - visible} remaining)</Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AppShell() {
   const [user, setUser] = useState(null);
   const [viewMode, setViewMode] = useState('admin');
 
@@ -2996,7 +4370,7 @@ function AppInner() {
     const perms = deriveUserPerms(u);
     setViewMode(perms.isAdmin ? 'admin' : 'user');
   };
-  const handleLogout = () => setUser(null);
+  const handleLogout = () => { if (user) Logger.log('auth', 'LOGOUT', user); setUser(null); };
   const handlePwChanged = (u) => setUser(u);
   const handleUserUpdate = (u) => setUser(u);
 
@@ -3010,7 +4384,8 @@ function AppInner() {
     const unsub = FireDB.subscribeUserDoc(watchUsername, (data) => {
       if (!data) return;
       if (data.activeSessionId && watchSessionId && data.activeSessionId !== watchSessionId) {
-        alert('You have been logged out because this account was signed in from another device or tab.');
+        Logger.log('auth', 'SESSION_ENDED', { username: watchUsername }, { details: 'Signed out because the same account logged in elsewhere' });
+        toast.error('You have been logged out because this account was signed in from another device or tab.');
         setUser(null);
       }
     });
@@ -3029,6 +4404,21 @@ function AppInner() {
   }
   if (perms.isAdmin) return <AdminPortal user={user} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />;
   return <UserPortal user={user} onLogout={handleLogout} />;
+}
+
+function AppInner() {
+  const [themeKey, setThemeKeyState] = useState(() => applyTheme(readSavedTheme()));
+  const setKey = (k) => {
+    const applied = applyTheme(k);
+    try { window.localStorage.setItem(THEME_STORE_KEY, applied); } catch (e) { /* storage unavailable */ }
+    setThemeKeyState(applied);
+  };
+  return (
+    <ThemeContext.Provider value={{ key: themeKey, setKey }}>
+      <AppShell />
+      <ToastHost />
+    </ThemeContext.Provider>
+  );
 }
 
 export default function App() {
