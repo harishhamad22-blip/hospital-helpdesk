@@ -4,6 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area
 } from 'recharts';
+import { createPortal } from 'react-dom';
 import { db } from './firebase';
 import {
   collection, addDoc, getDocs, doc, updateDoc, deleteDoc,
@@ -461,7 +462,7 @@ const printComplaint = (c) => {
 const C = {
   navy: '#0f4c43', navy2: '#0c3d36', navy3: '#14705f',
   gold: '#14876e', gold2: '#1ba386', goldL: '#e9f4f0',
-  white: '#ffffff', off: '#f5f8f7', card: '#ffffff',
+  white: '#ffffff', off: '#f5f8f7', card: 'rgba(255,255,255,0.56)',
   border: '#e1e9e6', border2: '#cdd8d4',
   text: '#17231f', text2: '#37463f', muted: '#6b7a73',
   green: '#177a45', greenL: '#eef7f1',
@@ -469,6 +470,9 @@ const C = {
   red: '#b42318', redL: '#fcf0ef',
   blue: '#0f4c43', blueL: '#e9f4f0',
   accent: '#0f4c43',
+  // glass tokens (constant across themes)
+  glass: 'rgba(255,255,255,0.56)', glassHi: 'rgba(255,255,255,0.78)', glassPop: 'rgba(255,255,255,0.93)',
+  field: 'rgba(255,255,255,0.70)', inset: 'rgba(255,255,255,0.40)', row1: 'rgba(255,255,255,0.50)', row2: 'rgba(255,255,255,0.24)',
 };
 
 const THEMES = {
@@ -478,7 +482,25 @@ const THEMES = {
   teal: { label: 'Teal', navy: '#0e7490', navy2: '#0b5e75', navy3: '#0f8aab', gold: '#0891b2', gold2: '#22b3d3', goldL: '#e6f6fa', off: '#f3f8fa', border: '#dbe8ed', border2: '#c3d6de', blue: '#0e7490', blueL: '#e6f6fa', accent: '#0e7490' },
   slate: { label: 'Graphite', navy: '#334155', navy2: '#1e293b', navy3: '#475569', gold: '#0f766e', gold2: '#14998f', goldL: '#eef2f6', off: '#f5f7f9', border: '#e2e8f0', border2: '#cbd5e1', blue: '#334155', blueL: '#eef2f6', accent: '#334155' },
   burgundy: { label: 'Burgundy', navy: '#9f1239', navy2: '#7f0f2e', navy3: '#bf1e4d', gold: '#d6336c', gold2: '#e5567f', goldL: '#fdf0f3', off: '#faf6f7', border: '#efe2e5', border2: '#e0cdd2', blue: '#9f1239', blueL: '#fdf0f3', accent: '#9f1239' },
+  luxe: { label: 'Obsidian Gold', navy: '#1b1d24', navy2: '#101217', navy3: '#2c303b', gold: '#9a6a12', gold2: '#c8962e', goldL: '#f8f0dc', off: '#f7f5ef', border: '#ebe4d2', border2: '#d9cfb6', blue: '#1b1d24', blueL: '#f8f0dc', accent: '#1b1d24' },
 };
+
+// Cursor-follow spotlight for glass cards (one global listener, rAF-throttled)
+if (typeof window !== 'undefined' && !window.__glassSpot) {
+  window.__glassSpot = true;
+  let raf = 0;
+  window.addEventListener('pointermove', (e) => {
+    if (raf || e.pointerType === 'touch') return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const el = e.target && e.target.closest ? e.target.closest('.glass-card') : null;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      el.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+      el.style.setProperty('--my', (e.clientY - r.top) + 'px');
+    });
+  }, { passive: true });
+}
 
 const THEME_STORE_KEY = 'idar_theme';
 const applyTheme = (key) => {
@@ -539,19 +561,27 @@ const useNowTick = (ms = 60000) => {
 };
 
 const buildGS = () => `
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Playfair+Display:wght@600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html{-webkit-text-size-adjust:100%;overflow-x:hidden;}
 html,body{width:100%;}
 :root{--nav-h:112px;}
-body{background:radial-gradient(1100px 520px at 105% -8%,${C.gold}1a,transparent 60%),radial-gradient(900px 480px at -10% 108%,${C.navy}12,transparent 60%),${C.off};background-attachment:fixed;font-family:'DM Sans',sans-serif;color:${C.text};font-size:15px;}
+body{position:relative;background:${C.off};font-family:'DM Sans',sans-serif;color:${C.text};font-size:15px;}
+body::before{content:'';position:fixed;inset:-25%;z-index:-1;pointer-events:none;will-change:transform;
+  background:radial-gradient(620px 470px at 18% 22%,${C.gold}3d,transparent 65%),radial-gradient(700px 530px at 82% 14%,${C.navy3}33,transparent 65%),radial-gradient(640px 520px at 74% 86%,#a78bfa33,transparent 65%),radial-gradient(580px 450px at 12% 88%,#fbbf2433,transparent 65%),radial-gradient(900px 600px at 50% 50%,#ffffff99,transparent 70%);
+  animation:aurora 38s ease-in-out infinite alternate;}
+body::after{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.05;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");}
+@keyframes aurora{0%{transform:translate3d(-2%,-1%,0) rotate(0deg) scale(1)}50%{transform:translate3d(2%,2%,0) rotate(4deg) scale(1.06)}100%{transform:translate3d(-1%,3%,0) rotate(-3deg) scale(1.02)}}
+::selection{background:${C.gold}40;}
 input,select,textarea,button{font-family:'DM Sans',sans-serif;}
+input,select,textarea{-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);}
+option{background:#fff;color:${C.text};}
 img{max-width:100%;height:auto;}
 button,select,input,a{touch-action:manipulation;}
-input:focus,select:focus,textarea:focus{border-color:${C.gold}!important;box-shadow:0 0 0 3px ${C.gold}26!important;outline:none;}
-::-webkit-scrollbar{width:6px;height:6px;}
+input:focus,select:focus,textarea:focus{border-color:${C.gold}!important;box-shadow:0 0 0 3px ${C.gold}2e,0 6px 18px ${C.gold}22!important;outline:none;background:rgba(255,255,255,.92)!important;}
+::-webkit-scrollbar{width:8px;height:8px;}
 ::-webkit-scrollbar-track{background:transparent;}
-::-webkit-scrollbar-thumb{background:#c3ccc8;border-radius:99px;}
+::-webkit-scrollbar-thumb{background:linear-gradient(180deg,${C.gold}88,${C.navy3}88);border-radius:99px;border:2px solid transparent;background-clip:padding-box;}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
@@ -562,25 +592,40 @@ input:focus,select:focus,textarea:focus{border-color:${C.gold}!important;box-sha
 @keyframes drawCheck{from{stroke-dashoffset:26}to{stroke-dashoffset:0}}
 .toast-in{animation:toastIn .28s cubic-bezier(.2,.8,.2,1) both;}
 .toast-check{stroke-dasharray:26;stroke-dashoffset:26;animation:drawCheck .45s .12s ease-out forwards;}
+
+/* ── GLASS CARD: frosted body + mirror-edge ring + cursor spotlight ── */
+.glass-card{position:relative;isolation:isolate;background:${C.glass};-webkit-backdrop-filter:blur(18px) saturate(170%);backdrop-filter:blur(18px) saturate(170%);border:1px solid rgba(255,255,255,.62);box-shadow:0 10px 32px ${C.navy}14,0 2px 6px rgba(16,24,40,.05),inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(255,255,255,.25);transition:transform .25s ease,box-shadow .25s ease,background .25s ease,border-color .25s ease;}
+.glass-card::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .3s ease;background:radial-gradient(280px circle at var(--mx,50%) var(--my,0%),rgba(255,255,255,.75),${C.gold}1c 45%,transparent 70%);}
+.glass-card::after{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,.95),rgba(255,255,255,.08) 38%,rgba(255,255,255,.22) 62%,rgba(255,255,255,.85));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;}
+.glass-card:hover{z-index:3;background:${C.glassHi};border-color:rgba(255,255,255,.9);}
+.glass-card:hover::before{opacity:1;}
+.glass-card:focus-within{z-index:40;}
+.hover-lift:hover{transform:translateY(-3px);box-shadow:0 22px 48px ${C.navy}26,0 4px 10px rgba(16,24,40,.06),inset 0 1px 0 rgba(255,255,255,.95);}
+
 .idar-btn{position:relative;overflow:hidden;transition:transform .18s ease,filter .18s ease,box-shadow .18s ease,background .18s ease;}
-.idar-btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06) saturate(1.05);box-shadow:0 8px 20px ${C.navy}33!important;}
+.idar-btn:not(.idar-btn-solid){-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);}
+.idar-btn-solid{box-shadow:inset 0 1px 0 rgba(255,255,255,.38),inset 0 -8px 14px rgba(0,0,0,.10)!important;}
+.idar-btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.07) saturate(1.06);box-shadow:0 10px 24px ${C.navy}38,inset 0 1px 0 rgba(255,255,255,.45)!important;}
 .idar-btn:active:not(:disabled){transform:translateY(0);filter:brightness(.98);}
-.idar-btn-solid::after{content:'';position:absolute;top:0;bottom:0;left:-60%;width:45%;background:linear-gradient(110deg,transparent,rgba(255,255,255,.38),transparent);transform:skewX(-20deg);transition:left .65s ease;pointer-events:none;}
+.idar-btn-solid::after{content:'';position:absolute;top:0;bottom:0;left:-60%;width:45%;background:linear-gradient(110deg,transparent,rgba(255,255,255,.42),transparent);transform:skewX(-20deg);transition:left .65s ease;pointer-events:none;}
 .idar-btn-solid:hover:not(:disabled)::after{left:130%;}
-.idar-btn:not(.idar-btn-solid):hover:not(:disabled){background:${C.goldL}!important;}
-.nav-btn{transition:background .18s ease,transform .18s ease,border-color .18s ease;}
-.nav-btn:hover{background:rgba(255,255,255,0.24)!important;border-color:rgba(255,255,255,0.55)!important;transform:translateY(-1px);}
+.idar-btn:not(.idar-btn-solid):hover:not(:disabled){background:rgba(255,255,255,.92)!important;}
+.nav-btn{transition:background .18s ease,transform .18s ease,border-color .18s ease,box-shadow .18s ease;}
+.nav-btn:hover{background:rgba(255,255,255,0.26)!important;border-color:rgba(255,255,255,0.6)!important;transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.18);}
 .tab-btn{transition:color .18s ease,background .18s ease,border-color .18s ease;}
-.tab-btn:hover{color:${C.navy}!important;background:${C.goldL}!important;}
-.hover-lift{transition:transform .2s ease,box-shadow .2s ease;}
-.hover-lift:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(16,24,40,0.12);}
+.tab-btn:hover{color:${C.navy}!important;background:rgba(255,255,255,.8)!important;}
 .menu-item{transition:background .15s ease;}
-.menu-item:hover{background:${C.goldL}!important;}
+.menu-item:hover{background:${C.gold}22!important;}
 button:focus-visible{outline:2px solid ${C.gold};outline-offset:2px;}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;}}
-.page-main{transition:padding-right .25s ease;}
-@media(min-width:1180px){body.assistant-docked .page-main{padding-right:400px;}}
-@media(max-width:1179px){.assistant-panel{top:auto!important;height:min(560px,78vh)!important;}}
+
+/* ── LAYERING: nothing hides behind anything ── */
+.page-main{transition:padding-right .25s ease;padding-bottom:96px!important;}
+@media(min-width:1500px){body.assistant-docked .page-main{margin-right:344px!important;}body.assistant-docked .modal-overlay{right:344px!important;}}
+.assistant-panel{top:auto!important;height:min(500px,calc(100vh - var(--nav-h,112px) - 28px))!important;}
+.modal-overlay{overscroll-behavior:contain;}
+.sticky-table{overflow:auto;}
+.sticky-table thead th{position:sticky;top:0;z-index:5;background:${C.goldL};box-shadow:0 1px 0 ${C.border2};}
 .fadeIn{animation:fadeIn .3s ease both;}
 .slideDown{animation:slideDown .18s ease both;}
 .pulse{animation:pulse 2.5s infinite;}
@@ -610,6 +655,15 @@ button:focus-visible{outline:2px solid ${C.gold};outline-offset:2px;}
 }
 @supports(padding:max(0px)){
   body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);}
+}
+/* fallbacks when the browser has no backdrop-filter or user asks for less transparency */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .glass-card{background:rgba(255,255,255,.92);}
+  input,select,textarea{background:#fff!important;}
+}
+@media(prefers-reduced-transparency:reduce){
+  .glass-card{background:rgba(255,255,255,.95);-webkit-backdrop-filter:none;backdrop-filter:none;}
+  body::before{animation:none;}
 }
 `;
 
@@ -648,12 +702,12 @@ function Btn({ children, onClick, variant = 'primary', size = 'md', style = {}, 
     primary: { background: `linear-gradient(135deg,${C.navy},${C.navy3})`, color: '#fff', border: `1px solid ${C.navy}`, boxShadow: `0 1px 3px ${C.navy}40` },
     gold: { background: `linear-gradient(135deg,${C.gold},${C.gold2})`, color: '#fff', border: `1px solid ${C.gold}`, boxShadow: `0 1px 3px ${C.gold}40` },
     success: { background: 'linear-gradient(135deg,#146b3b,#1c8a4c)', color: '#fff', border: '1px solid #146b3b', boxShadow: '0 1px 3px rgba(20,107,59,0.35)' },
-    danger: { background: '#fff', color: C.red, border: `1px solid ${C.red}66` },
-    warning: { background: '#fff', color: C.yellow, border: `1px solid ${C.yellow}66` },
+    danger: { background: C.glassHi, color: C.red, border: `1px solid ${C.red}66` },
+    warning: { background: C.glassHi, color: C.yellow, border: `1px solid ${C.yellow}66` },
     purple: { background: `linear-gradient(135deg,${C.gold},${C.gold2})`, color: '#fff', border: `1px solid ${C.gold}`, boxShadow: `0 1px 3px ${C.gold}40` },
     soft: { background: C.goldL, color: C.navy, border: `1px solid ${C.border2}` },
     ghost: { background: 'transparent', color: C.muted, border: `1px solid ${C.border2}` },
-    outline: { background: '#fff', color: C.navy, border: `1px solid ${C.navy}80` },
+    outline: { background: C.glassHi, color: C.navy, border: `1px solid ${C.navy}80` },
   };
   const ss = {
     sm: { padding: '7px 14px', fontSize: 12.5, borderRadius: 8 },
@@ -674,8 +728,8 @@ function Btn({ children, onClick, variant = 'primary', size = 'md', style = {}, 
 
 function Card({ children, style = {}, className = '', ...rest }) {
   return (
-    <div className={className} {...rest}
-      style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: '0 1px 2px rgba(16,24,40,0.04)', ...style }}>
+    <div className={`glass-card ${className}`.trim()} {...rest}
+      style={{ borderRadius: 16, ...style }}>
       {children}
     </div>
   );
@@ -694,9 +748,9 @@ function Badge({ status }) {
   );
 }
 
-function KpiTile({ label, value, note, color, bg }) {
+function KpiTile({ label, value, note, color }) {
   return (
-    <div className="hover-lift" style={{ background: bg, border: `1px solid ${color}26`, borderRadius: 12, padding: '14px 16px', minWidth: 0 }}>
+    <div className="hover-lift glass-card" style={{ background: `linear-gradient(145deg,${color}26,${color}0a),${C.glass}`, borderRadius: 16, padding: '14px 16px', minWidth: 0 }}>
       <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase', color }}>{label}</div>
       <div style={{ fontSize: 26, fontWeight: 700, color, margin: '6px 0 2px', lineHeight: 1.1 }}>{value}</div>
       {note && <div style={{ fontSize: 11.5, color: C.muted }}>{note}</div>}
@@ -704,6 +758,8 @@ function KpiTile({ label, value, note, color, bg }) {
   );
 }
 
+// Rendered through a portal into <body>, so a dialog can never be clipped, trapped or
+// covered by a glass card / transformed ancestor. It always sits below the navbar.
 function Modal({ open, onClose, title, children, width = 520, fullscreen = false, z = 1000 }) {
   useEffect(() => {
     if (!open) return undefined;
@@ -717,49 +773,47 @@ function Modal({ open, onClose, title, children, width = 520, fullscreen = false
     };
   }, [open, fullscreen, onClose]);
   if (!open) return null;
-  const headBg = `linear-gradient(90deg,${C.navy2},${C.navy3})`;
+  const headBg = `linear-gradient(100deg,${C.navy2}f2,${C.navy3}e6)`;
   const closeBtn = (
     <button onClick={onClose} aria-label="Close" className="nav-btn" style={{
-      background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.4)',
+      background: 'rgba(255,255,255,0.16)', border: '1px solid rgba(255,255,255,0.45)',
       color: '#fff', fontSize: 20, cursor: 'pointer', lineHeight: 1, width: 34, height: 34,
       borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
     }}>&times;</button>
   );
-  // Large dialog: opens below the navbar (navbar stays in place) and closes back to the list.
-  if (fullscreen) {
-    return (
-      <div className="fadeIn" onClick={e => e.target === e.currentTarget && onClose()}
-        style={{
-          position: 'fixed', left: 0, right: 0, bottom: 0, top: 'var(--nav-h, 0px)', zIndex: z,
-          background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
-        }}>
-        <div className="fadeUp" style={{
-          width: '100%', maxWidth: 1240, height: '100%', background: C.off, borderRadius: 18, overflow: 'hidden',
-          display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(15,23,42,0.35)', border: '1px solid rgba(255,255,255,0.7)'
-        }}>
-          <div style={{ background: headBg, color: '#fff', flexShrink: 0, padding: '14px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ fontWeight: 600, fontSize: 16, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
-            {closeBtn}
-          </div>
-          <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px 28px' }}>{children}</div>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: z,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12
-    }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
+  const overlay = {
+    position: 'fixed', left: 0, right: 0, bottom: 0, top: 'var(--nav-h, 0px)', zIndex: z,
+    background: 'rgba(15,23,42,0.30)', backdropFilter: 'blur(12px) saturate(140%)', WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: fullscreen ? 16 : 12
+  };
+  const panel = {
+    background: 'linear-gradient(145deg,rgba(255,255,255,0.88),rgba(255,255,255,0.72))',
+    backdropFilter: 'blur(28px) saturate(180%)', WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+    border: '1px solid rgba(255,255,255,0.85)', boxShadow: '0 30px 80px rgba(15,23,42,0.32), inset 0 1px 0 rgba(255,255,255,0.95)'
+  };
+  const node = fullscreen ? (
+    <div className="fadeIn modal-overlay" onClick={e => e.target === e.currentTarget && onClose()} style={overlay}>
       <div className="fadeUp" style={{
-        background: C.card, borderRadius: 16, width: '100%', maxWidth: width,
-        maxHeight: '92vh', overflow: 'auto', boxShadow: '0 24px 60px rgba(15,23,42,0.28)'
+        ...panel, width: '100%', maxWidth: 1560, height: '100%', borderRadius: 22, overflow: 'hidden',
+        display: 'flex', flexDirection: 'column'
+      }}>
+        <div style={{ background: headBg, color: '#fff', flexShrink: 0, padding: '14px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.25)' }}>
+          <div style={{ fontWeight: 600, fontSize: 16, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+          {closeBtn}
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px 28px' }}>{children}</div>
+      </div>
+    </div>
+  ) : (
+    <div className="fadeIn modal-overlay" style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="fadeUp" style={{
+        ...panel, borderRadius: 22, width: '100%', maxWidth: Math.round(width * 1.15),
+        maxHeight: 'calc(100vh - var(--nav-h, 0px) - 24px)', overflow: 'auto'
       }}>
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-          padding: '14px 20px', background: headBg, position: 'sticky', top: 0, borderRadius: '16px 16px 0 0', zIndex: 2
+          padding: '14px 20px', background: headBg, position: 'sticky', top: 0, borderRadius: '22px 22px 0 0', zIndex: 2,
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.25)'
         }}>
           <span style={{ fontWeight: 600, fontSize: 15.5, color: '#fff' }}>{title}</span>
           {closeBtn}
@@ -768,6 +822,7 @@ function Modal({ open, onClose, title, children, width = 520, fullscreen = false
       </div>
     </div>
   );
+  return createPortal(node, document.body);
 }
 
 const LOGIN_SLIDES = [
@@ -954,8 +1009,8 @@ function FieldLabel({ children, required }) {
 
 const inputStyle = {
   width: '100%', borderRadius: 10, padding: '10px 14px', fontSize: 14, outline: 'none',
-  transition: 'border .15s, box-shadow .15s', lineHeight: 1.4,
-  get background() { return '#fff'; },
+  transition: 'border .15s, box-shadow .15s, background .15s', lineHeight: 1.4, boxShadow: 'inset 0 1px 3px rgba(16,24,40,0.07), 0 1px 0 rgba(255,255,255,0.7)', backdropFilter: 'blur(8px)',
+  get background() { return C.field; },
   get border() { return `1px solid ${C.border2}`; },
   get color() { return C.text; },
 };
@@ -1011,7 +1066,7 @@ function SearchDropdown({ label, value, onChange, options, placeholder = 'Search
       </div>
       {open && (filtered.length > 0 || showCustomRow) && (
         <div className="slideDown" style={{
-          position: 'absolute', zIndex: 300, background: C.card,
+          position: 'absolute', zIndex: 300, background: C.glassPop, backdropFilter: 'blur(22px) saturate(170%)', WebkitBackdropFilter: 'blur(22px) saturate(170%)',
           border: `1.5px solid ${C.border2}`, borderRadius: 12, marginTop: 3,
           maxHeight: 240, overflow: 'auto', boxShadow: '0 12px 32px #0b2a2220', width: '100%', left: 0
         }}>
@@ -1055,11 +1110,11 @@ function UserTypeFields({ form, set, headOptions }) {
     set(key, list.includes(val) ? list.filter(x => x !== val) : [...list, val]);
   };
   const chipBtn = { fontSize: 11.5, background: 'none', border: `1px solid ${C.border2}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', color: C.text2 };
-  const listBox = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: 8, maxHeight: 200, overflow: 'auto', background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 };
+  const listBox = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: 8, maxHeight: 200, overflow: 'auto', background: C.glassHi, border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 };
   const heads = form.headUsernames || [];
   const cats = form.adminCategories || [];
   return (
-    <div style={{ marginBottom: 16, background: C.off, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 14px' }}>
+    <div style={{ marginBottom: 16, background: C.inset, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 14px' }}>
       <FieldLabel>User Type</FieldLabel>
       {radio('employee', 'Employee', 'raises and tracks own tickets')}
       {radio('categoryAdmin', 'Head / Category Admin', 'manages selected categories and allocates tickets to technicians')}
@@ -1193,12 +1248,12 @@ function ThemeMenu({ light = false }) {
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button onClick={() => setOpen(o => !o)} aria-label="Change theme" title="Theme" className={light ? '' : 'nav-btn'}
-        style={light ? { ...NAV_ICON_BTN, background: '#fff', border: `1px solid ${C.border2}`, color: C.navy, boxShadow: '0 2px 8px rgba(16,24,40,0.08)' } : NAV_ICON_BTN}>
+        style={light ? { ...NAV_ICON_BTN, background: C.glassHi, border: `1px solid ${C.border2}`, color: C.navy, boxShadow: '0 2px 8px rgba(16,24,40,0.08)' } : NAV_ICON_BTN}>
         <PaletteIcon />
       </button>
       {open && (
         <div className="slideDown" style={{
-          position: 'absolute', top: 44, right: 0, width: 220, background: '#fff', borderRadius: 12,
+          position: 'absolute', top: 44, right: 0, width: 220, background: C.glassPop, backdropFilter: 'blur(22px) saturate(170%)', WebkitBackdropFilter: 'blur(22px) saturate(170%)', borderRadius: 14,
           border: `1px solid ${C.border}`, boxShadow: '0 16px 40px rgba(16,24,40,0.18)', zIndex: 500, padding: 6
         }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase', color: C.muted, padding: '8px 10px 6px' }}>Theme</div>
@@ -1239,10 +1294,10 @@ function TopBar({ subtitle, roleLabel, user, onLogout, tabs, activeTab, onTabCha
     return () => { window.removeEventListener('resize', apply); if (ro) ro.disconnect(); };
   }, []);
   return (
-    <div ref={barRef} id="idar-topbar" style={{ position: 'sticky', top: 0, zIndex: 1100, boxShadow: '0 4px 18px rgba(16,24,40,0.14)' }}>
+    <div ref={barRef} id="idar-topbar" style={{ position: 'sticky', top: 0, zIndex: 1100, boxShadow: '0 10px 34px rgba(16,24,40,0.20)' }}>
       <div style={{
         background: `linear-gradient(100deg,${C.navy2}f5,${C.navy3}f2)`, backdropFilter: 'blur(16px) saturate(160%)',
-        WebkitBackdropFilter: 'blur(16px) saturate(160%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)'
+        WebkitBackdropFilter: 'blur(16px) saturate(160%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -1px 0 rgba(255,255,255,0.10)', position: 'relative', zIndex: 3
       }}>
         <div style={{
           maxWidth, margin: '0 auto', padding: '10px 16px', minHeight: 60,
@@ -1250,13 +1305,13 @@ function TopBar({ subtitle, roleLabel, user, onLogout, tabs, activeTab, onTabCha
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
             <div style={{
-              width: 38, height: 38, borderRadius: 10, background: '#fff', display: 'flex',
+              width: 38, height: 38, borderRadius: 11, background: '#fff', boxShadow: '0 2px 10px rgba(0,0,0,.25), inset 0 0 0 1px rgba(255,255,255,.6)', display: 'flex',
               alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0
             }}>
               <img src={chrclogo} alt="Logo" style={{ width: 27, height: 27, objectFit: 'contain' }} />
             </div>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 15.5, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '52vw' }}>
+              <div style={{ fontFamily: "'Playfair Display','Poppins',serif", fontWeight: 700, letterSpacing: .3, fontSize: 16.5, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '52vw' }}>
                 CHRC IDAR Ticket System
               </div>
               <div className="hide-sm" style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.7)' }}>{subtitle}</div>
@@ -1284,12 +1339,12 @@ function TopBar({ subtitle, roleLabel, user, onLogout, tabs, activeTab, onTabCha
         </div>
       </div>
       {tabs && (
-        <div style={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ position: 'relative', zIndex: 1, background: 'rgba(255,255,255,0.58)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', borderBottom: '1px solid rgba(255,255,255,0.7)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.8)' }}>
           <div style={{ maxWidth, margin: '0 auto', padding: '0 12px', display: 'flex', gap: 2, overflowX: 'auto' }}>
             {tabs.map(([k, l]) => (
               <button key={k} onClick={() => onTabChange(k)} className="tab-btn"
                 style={{
-                  padding: '12px 18px', background: 'none', border: 'none', whiteSpace: 'nowrap',
+                  padding: '12px 18px', background: activeTab === k ? 'rgba(255,255,255,0.7)' : 'none', borderRadius: '12px 12px 0 0', border: 'none', whiteSpace: 'nowrap',
                   borderBottom: `2.5px solid ${activeTab === k ? C.gold : 'transparent'}`,
                   color: activeTab === k ? C.navy : C.muted,
                   fontWeight: activeTab === k ? 600 : 500, fontSize: 13.5, cursor: 'pointer', transition: 'all .15s'
@@ -1307,6 +1362,116 @@ function TopBar({ subtitle, roleLabel, user, onLogout, tabs, activeTab, onTabCha
         </div>
       )}
     </div>
+  );
+}
+
+// Glass multi-select dropdown (checkbox list, search, select-all / clear).
+// The list is rendered through a portal with fixed positioning, so it can never be clipped or hidden by a card.
+function MultiSelect({ options, value, onChange, placeholder = 'All', style = {}, searchable }) {
+  const opts = useMemo(() => options.map(o => (typeof o === 'string' ? { value: o, label: o } : o)), [options]);
+  const sel = Array.isArray(value) ? value : [];
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  const popRef = useRef(null);
+  const showSearch = searchable === undefined ? opts.length > 8 : searchable;
+
+  const place = () => {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const w = Math.max(r.width, 270);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    const below = window.innerHeight - r.bottom - 14;
+    if (below < 200 && r.top > below) setPos({ left, width: w, bottom: window.innerHeight - r.top + 6, maxH: Math.min(380, r.top - 14) });
+    else setPos({ left, width: w, top: r.bottom + 6, maxH: Math.max(200, Math.min(380, below)) });
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    place();
+    const onDown = (e) => {
+      if (btnRef.current && btnRef.current.contains(e.target)) return;
+      if (popRef.current && popRef.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    const onMove = (e) => { if (popRef.current && popRef.current.contains(e.target)) return; place(); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', onMove, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', onMove, true);
+    };
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const shown = q ? opts.filter(o => safeLC(o.label).includes(q.toLowerCase())) : opts;
+  const toggle = (v) => onChange(sel.includes(v) ? sel.filter(x => x !== v) : [...sel, v]);
+  const selectShown = () => onChange(Array.from(new Set([...sel, ...shown.map(o => o.value)])));
+  const labelOf = (v) => (opts.find(o => o.value === v) || { label: v }).label;
+  const has = sel.length > 0;
+
+  return (
+    <>
+      <button type="button" ref={btnRef} onClick={() => { setOpen(o => !o); setQ(''); }}
+        style={{
+          ...inputStyle, ...style, display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left', cursor: 'pointer',
+          border: `1px solid ${has ? C.gold : C.border2}`, background: has ? `${C.gold}18` : C.field,
+          color: has ? C.navy : C.text2, fontWeight: has ? 600 : 400
+        }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {!has ? placeholder : sel.length === 1 ? labelOf(sel[0]) : labelOf(sel[0])}
+        </span>
+        {sel.length > 1 && (
+          <span style={{ background: C.navy, color: '#fff', borderRadius: 99, fontSize: 10.5, fontWeight: 700, padding: '1px 7px', flexShrink: 0 }}>+{sel.length - 1}</span>
+        )}
+        <span style={{ fontSize: 10, color: C.muted, flexShrink: 0 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && pos && createPortal(
+        <div ref={popRef} className="slideDown" style={{
+          position: 'fixed', left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, zIndex: 1300,
+          background: C.glassPop, backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+          border: '1px solid rgba(255,255,255,0.9)', borderRadius: 16, boxShadow: '0 24px 60px rgba(16,24,40,0.28), inset 0 1px 0 #fff',
+          display: 'flex', flexDirection: 'column', maxHeight: pos.maxH, overflow: 'hidden'
+        }}>
+          <div style={{ padding: '10px 10px 8px', borderBottom: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {showSearch && (
+              <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search..."
+                style={{ ...inputStyle, height: 34, fontSize: 12.5, padding: '6px 12px' }} />
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 11.5, color: C.muted, fontWeight: 600 }}>{sel.length} selected</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button type="button" onClick={selectShown} style={{ fontSize: 11.5, fontWeight: 600, color: C.navy, background: C.goldL, border: `1px solid ${C.border2}`, borderRadius: 8, padding: '3px 10px', cursor: 'pointer' }}>Select all</button>
+                <button type="button" onClick={() => onChange([])} style={{ fontSize: 11.5, fontWeight: 600, color: C.red, background: C.redL, border: `1px solid ${C.red}33`, borderRadius: 8, padding: '3px 10px', cursor: 'pointer' }}>Clear</button>
+              </div>
+            </div>
+          </div>
+          <div style={{ overflowY: 'auto', padding: 6, flex: 1 }}>
+            {shown.length === 0 && <div style={{ padding: 14, textAlign: 'center', fontSize: 12.5, color: C.muted }}>No match</div>}
+            {shown.map(o => {
+              const on = sel.includes(o.value);
+              return (
+                <div key={o.value} onClick={() => toggle(o.value)} className="menu-item"
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, cursor: 'pointer', fontSize: 13, color: C.text, background: on ? `${C.gold}1c` : 'transparent', fontWeight: on ? 600 : 400 }}>
+                  <span style={{
+                    width: 18, height: 18, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: `1.5px solid ${on ? C.navy : C.border2}`, background: on ? C.navy : '#fff', color: '#fff', fontSize: 12, lineHeight: 1
+                  }}>{on ? '✓' : ''}</span>
+                  <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{o.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
 
@@ -1518,7 +1683,7 @@ const clockLabel = (iso) => {
   return isNaN(d) ? '' : d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 };
 
-const ASSISTANT_DOCK_MIN = 1180;
+const ASSISTANT_DOCK_MIN = 1500;
 
 function TicketAssistant({ tickets, viewer, me }) {
   const nowMs = useNowTick(60000);
@@ -1657,7 +1822,7 @@ function TicketAssistant({ tickets, viewer, me }) {
     return (
       <button onClick={() => setOpen(true)} aria-label="Open ticket assistant" title="Ticket Assistant" className="nav-btn"
         style={{
-          position: 'fixed', right: 18, bottom: 18, zIndex: 900, width: 54, height: 54, borderRadius: '50%',
+          position: 'fixed', right: 18, bottom: 18, zIndex: 1150, width: 54, height: 54, borderRadius: '50%',
           background: `linear-gradient(135deg,${C.navy},${C.navy3})`, color: '#fff', border: '2px solid rgba(255,255,255,0.7)', cursor: 'pointer',
           boxShadow: `0 10px 26px ${C.navy}66`, display: 'flex', alignItems: 'center', justifyContent: 'center'
         }}>
@@ -1677,7 +1842,7 @@ function TicketAssistant({ tickets, viewer, me }) {
 
   const kindOf = (k) => ASSISTANT_KIND[k] || ASSISTANT_KIND.update;
   const bubble = (kind) => ({
-    background: '#fff', border: `1px solid ${C.border}`, boxShadow: `inset 3px 0 0 ${kindOf(kind).color}, 0 1px 2px rgba(16,24,40,0.05)`,
+    background: C.glassHi, border: `1px solid ${C.border}`, boxShadow: `inset 3px 0 0 ${kindOf(kind).color}, 0 1px 2px rgba(16,24,40,0.05)`,
     borderRadius: '4px 16px 16px 16px', padding: '10px 14px', fontSize: 12.5, lineHeight: 1.6, color: C.text2, wordBreak: 'break-word'
   });
   const tag = (e, typing) => (
@@ -1697,7 +1862,7 @@ function TicketAssistant({ tickets, viewer, me }) {
 
   return (
     <div className="assistant-panel" style={{
-      position: 'fixed', right: 14, bottom: 14, top: 'calc(var(--nav-h, 112px) + 14px)', zIndex: 900, width: 376, maxWidth: 'calc(100vw - 20px)',
+      position: 'fixed', right: 14, bottom: 14, top: 'calc(var(--nav-h, 112px) + 14px)', zIndex: 1150, width: 320, maxWidth: 'calc(100vw - 20px)',
       background: 'rgba(255,255,255,0.94)', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)',
       border: `1px solid ${C.border2}`, borderRadius: 20, boxShadow: '0 20px 54px rgba(16,24,40,0.2)',
       display: 'flex', flexDirection: 'column', overflow: 'hidden'
@@ -1715,18 +1880,18 @@ function TicketAssistant({ tickets, viewer, me }) {
           style={{ background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.4)', color: '#fff', width: 30, height: 30, borderRadius: '50%', cursor: 'pointer', fontSize: 17, lineHeight: 1 }}>&minus;</button>
       </div>
       {activeCount > 1 && (
-        <div style={{ display: 'flex', gap: 6, padding: '9px 12px', overflowX: 'auto', borderBottom: `1px solid ${C.border}`, background: '#fff', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 6, padding: '9px 12px', overflowX: 'auto', borderBottom: `1px solid ${C.border}`, background: C.glassHi, flexShrink: 0 }}>
           {[['', `All (${activeCount})`], ...activeTickets.map(c => [c.id, c.id])].map(([k, label], ci) => (
             <button key={`${k || 'all'}-${ci}`} onClick={() => setFocus(k)}
               style={{
                 flexShrink: 0, padding: '4px 11px', borderRadius: 99, fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap',
                 fontFamily: k ? "'JetBrains Mono',monospace" : 'inherit', fontWeight: focus === k ? 700 : 500,
-                border: `1px solid ${focus === k ? C.navy : C.border2}`, background: focus === k ? C.goldL : '#fff', color: focus === k ? C.navy : C.text2
+                border: `1px solid ${focus === k ? C.navy : C.border2}`, background: focus === k ? C.goldL : C.glassHi, color: focus === k ? C.navy : C.text2
               }}>{label}</button>
           ))}
         </div>
       )}
-      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, background: C.off, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, background: C.inset, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {rows.length === 0 && !live && (
           <div style={{ margin: 'auto', textAlign: 'center', color: C.muted, fontSize: 12.5, padding: 20, lineHeight: 1.7 }}>
             <AssistantAvatar size={44} />
@@ -1734,7 +1899,7 @@ function TicketAssistant({ tickets, viewer, me }) {
           </div>
         )}
         {rows.map(e => e.sep ? (
-          <div key={e.key} style={{ alignSelf: 'center', fontSize: 10.5, fontWeight: 600, color: C.muted, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 99, padding: '2px 12px' }}>{e.sep}</div>
+          <div key={e.key} style={{ alignSelf: 'center', fontSize: 10.5, fontWeight: 600, color: C.muted, background: C.glassHi, border: `1px solid ${C.border}`, borderRadius: 99, padding: '2px 12px' }}>{e.sep}</div>
         ) : (
           <div key={e.key} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', maxWidth: '96%' }}>
             <AssistantAvatar size={26} />
@@ -1763,9 +1928,9 @@ function TicketAssistant({ tickets, viewer, me }) {
           </div>
         )}
       </div>
-      <div style={{ padding: '10px 14px', borderTop: `1px solid ${C.border}`, background: '#fff', flexShrink: 0 }}>
+      <div style={{ padding: '10px 14px', borderTop: `1px solid ${C.border}`, background: C.glassHi, flexShrink: 0 }}>
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: C.off, border: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: C.inset, border: `1px solid ${C.border}`,
           borderRadius: 99, padding: '8px 14px', fontSize: 11.5, color: C.muted
         }}>
           <span>Tracking {activeCount} active ticket{activeCount === 1 ? '' : 's'}</span>
@@ -2011,7 +2176,7 @@ function AiInsightsPanel({ rows, techs }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 12 }}>
         {items.map((it, i) => (
           <div key={i} style={{
-            background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 14px',
+            background: C.glassHi, border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 14px',
             boxShadow: `inset 3px 0 0 ${tone[it.tone] || C.navy}`
           }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: tone[it.tone] || C.navy, marginBottom: 4 }}>{it.title}</div>
@@ -2041,7 +2206,7 @@ function TicketStepper({ c, compact = false }) {
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <span style={{
                 width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
-                background: reached ? (done ? '#16a34a' : C.navy) : '#fff', border: `2px solid ${reached ? (done ? '#16a34a' : C.navy) : C.border2}`,
+                background: reached ? (done ? '#16a34a' : C.navy) : C.glassHi, border: `2px solid ${reached ? (done ? '#16a34a' : C.navy) : C.border2}`,
                 boxShadow: current ? `0 0 0 4px ${C.navy}22` : 'none'
               }} />
               {i < steps.length - 1 && <span style={{ flex: 1, height: 2, background: i < stage ? (done ? '#16a34a' : C.navy) : C.border2, margin: '0 4px', borderRadius: 2 }} />}
@@ -2129,7 +2294,7 @@ function TicketGridCard({ c, onOpen }) {
   return (
     <div onClick={() => onOpen(c)}
       style={{
-        background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12,
+        background: C.glassHi, border: `1px solid ${C.border}`, borderRadius: 12,
         padding: 16, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10,
         boxShadow: `inset 4px 0 0 ${st.dot}, 0 1px 2px rgba(16,24,40,0.04)`, transition: 'box-shadow .15s, transform .15s'
       }}
@@ -2460,7 +2625,7 @@ function LoginPage({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', background: `linear-gradient(135deg,${C.off},${C.goldL})`, position: 'relative' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', background: 'transparent', position: 'relative' }}>
       <style>{buildGS()}</style>
       <div style={{ position: 'absolute', top: 16, right: 18, zIndex: 20 }}><ThemeMenu light /></div>
 
@@ -2498,10 +2663,10 @@ function LoginPage({ onLogin }) {
       {/* ── RIGHT — login card panel ── */}
       <div className="login-right" style={{
         flex: '1 1 42%', minWidth: 340, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '24px 20px', background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(6px)',
-        borderLeft: `1px solid ${C.border}`
+        padding: '24px 20px', background: 'transparent',
+        borderLeft: 'none'
       }}>
-        <div className="fadeUp" style={{ width: '100%', maxWidth: 380 }}>
+        <div className="fadeUp glass-card" style={{ width: '100%', maxWidth: 410, padding: '30px 30px 26px', borderRadius: 28, background: C.glassHi }}>
           <div style={{ textAlign: 'center', marginBottom: 22 }}>
             <img src={chrclogo} alt="Choithram Hospital & Research Centre" style={{ width: 130, height: 130, objectFit: 'contain' }} />
           </div>
@@ -2515,7 +2680,7 @@ function LoginPage({ onLogin }) {
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: C.text2, marginBottom: 6 }}>User Name</label>
                 <input value={username} onChange={e => setUsername(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                  style={{ ...inputStyle, background: '#fff', border: `1.5px solid ${C.border2}` }} />
+                  style={{ ...inputStyle, background: C.glassHi, border: `1.5px solid ${C.border2}` }} />
               </div>
               <div style={{ marginBottom: 8 }}>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: C.text2, marginBottom: 6 }}>Password</label>
@@ -2523,7 +2688,7 @@ function LoginPage({ onLogin }) {
                   <SecretInput show={showPw} value={password}
                     onChange={e => setPassword(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                    style={{ ...inputStyle, background: '#fff', border: `1.5px solid ${C.border2}`, paddingRight: 52 }} />
+                    style={{ ...inputStyle, background: C.glassHi, border: `1.5px solid ${C.border2}`, paddingRight: 52 }} />
                   <button onClick={() => setShowPw(s => !s)} type="button"
                     style={{
                       position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
@@ -2576,18 +2741,18 @@ function LoginPage({ onLogin }) {
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: C.text2, marginBottom: 6 }}>User Name</label>
                 <input value={fpUsername} onChange={e => setFpUsername(e.target.value)}
-                  style={{ ...inputStyle, background: '#fff', border: `1.5px solid ${C.border2}` }} />
+                  style={{ ...inputStyle, background: C.glassHi, border: `1.5px solid ${C.border2}` }} />
               </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: C.text2, marginBottom: 6 }}>New Password</label>
                 <SecretInput value={fpNew1} onChange={e => setFpNew1(e.target.value)}
-                  placeholder="Minimum 3 characters" style={{ ...inputStyle, background: '#fff', border: `1.5px solid ${C.border2}` }} />
+                  placeholder="Minimum 3 characters" style={{ ...inputStyle, background: C.glassHi, border: `1.5px solid ${C.border2}` }} />
               </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: C.text2, marginBottom: 6 }}>Confirm New Password</label>
                 <SecretInput value={fpNew2} onChange={e => setFpNew2(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleForgotPassword()}
-                  style={{ ...inputStyle, background: '#fff', border: `1.5px solid ${C.border2}` }} />
+                  style={{ ...inputStyle, background: C.glassHi, border: `1.5px solid ${C.border2}` }} />
               </div>
               {fpError && (
                 <div style={{
@@ -2644,7 +2809,7 @@ function ChangePasswordPage({ user, onDone, onLogout }) {
 
   return (
     <div style={{
-      minHeight: '100vh', background: `linear-gradient(180deg,#ffffff 0%,${C.off} 100%)`,
+      minHeight: '100vh', background: 'transparent',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
     }}>
       <style>{buildGS()}</style>
@@ -2662,7 +2827,7 @@ function ChangePasswordPage({ user, onDone, onLogout }) {
             Welcome, <strong style={{ color: C.text }}>{user.displayName}</strong>!<br />Create a secure password to continue.
           </p>
         </div>
-        <div style={{ background: '#fff', borderRadius: 18, padding: 26, boxShadow: `0 16px 44px ${C.navy}14`, border: `1px solid ${C.border}` }}>
+        <div style={{ background: C.glassHi, borderRadius: 18, padding: 26, boxShadow: `0 16px 44px ${C.navy}14`, border: `1px solid ${C.border}` }}>
           <div style={{ marginBottom: 16 }}>
             <FieldLabel>New Password</FieldLabel>
             <SecretInput value={form.new1} onChange={e => f('new1', e.target.value)}
@@ -2830,7 +2995,7 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
         <div style={{ marginTop: 14 }}><TicketStepper c={c} compact /></div>
         {statusMsg && (
           <div style={{
-            marginTop: 10, padding: '8px 12px', background: C.off, borderLeft: `3px solid ${statusMsg.color}`,
+            marginTop: 10, padding: '8px 12px', background: C.inset, borderLeft: `3px solid ${statusMsg.color}`,
             borderRadius: 6, fontSize: 12.5, color: C.text2, lineHeight: 1.5, wordBreak: 'break-word'
           }}>
             {statusMsg.msg}
@@ -2846,7 +3011,7 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: C.off }}>
+    <div style={{ minHeight: '100vh', background: 'transparent' }}>
       <style>{buildGS()}</style>
       <TopBar
         subtitle="Employee Portal — Complaint & Request System"
@@ -2857,7 +3022,7 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
         activeTab={tab}
         onTabChange={setTab}
         tabBadges={{ status: myComplaints.length }}
-        maxWidth={1300}
+        maxWidth={1500}
         extraActions={canSwitch ? (
           <Btn onClick={onSwitchView} variant="ghost" size="sm" style={{ color: '#fff', border: '1px solid rgba(255,255,255,0.3)' }}>
             Switch to Admin View
@@ -2865,7 +3030,7 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
         ) : null}
       />
 
-      <div className="page-main" style={{ maxWidth: 1300, margin: '0 auto', padding: '24px 16px' }}>
+      <div className="page-main" style={{ maxWidth: 1500, margin: '0 auto', padding: '24px 16px' }}>
         {/* NEW TICKET FORM */}
         {tab === 'form' && (
           <div className="fadeUp">
@@ -2907,7 +3072,7 @@ function UserPortal({ user, onLogout, canSwitch = false, onSwitchView }) {
                       <button key={key} onClick={() => sf('priority', key)}
                         style={{
                           flex: '1 1 140px', padding: '14px 16px', borderRadius: 12, cursor: 'pointer',
-                          border: `2px solid ${sel ? p.color : C.border2}`, background: sel ? p.bg : '#fff',
+                          border: `2px solid ${sel ? p.color : C.border2}`, background: sel ? p.bg : C.glassHi,
                           fontWeight: 700, fontSize: 14, color: sel ? p.color : C.text2, transition: 'all .15s',
                           textAlign: 'center'
                         }}>
@@ -3059,7 +3224,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
   const perms = deriveUserPerms(user);
   const [tab, setTab] = useState('complaints');
   const [complaints, setComplaints] = useState([]);
-  const [filters, setFilters] = useState({ dept: '', type: '', status: perms.adminScope === 'assigned' ? 'hold' : 'open', priority: '', assign: '', search: '', from: '', to: '' });
+  const [filters, setFilters] = useState({ dept: [], type: [], status: perms.adminScope === 'assigned' ? 'hold' : 'open', priority: [], assign: [], search: '', from: '', to: '' });
   // however many tickets pile up over months/years, only render a page's worth
   // at a time — keeps the list smooth on phones instead of dumping everything
   // into the DOM at once.
@@ -3216,13 +3381,12 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
 
   const filtered = useMemo(() => {
     const rows = scopedComplaints.filter(c => {
-      if (filters.dept && c.dept !== filters.dept) return false;
-      if (filters.type && c.type !== filters.type) return false;
+      if (filters.dept.length && !filters.dept.includes(c.dept)) return false;
+      if (filters.type.length && !filters.type.includes(c.type)) return false;
       if (filters.status === 'done') { if (c.status !== 'resolved' && c.status !== 'closed') return false; }
       else if (filters.status && c.status !== filters.status) return false;
-      if (filters.priority && c.priority !== filters.priority) return false;
-      if (filters.assign === 'unassigned' && c.assignedTo) return false;
-      if (filters.assign && filters.assign !== 'unassigned' && safeLC(c.assignedTo) !== safeLC(filters.assign)) return false;
+      if (filters.priority.length && !filters.priority.includes(c.priority)) return false;
+      if (filters.assign.length && !filters.assign.some(a => (a === 'unassigned' ? !c.assignedTo : safeLC(c.assignedTo) === safeLC(a)))) return false;
       if (filters.from && new Date(c.at) < new Date(filters.from)) return false;
       if (filters.to && new Date(c.at) > new Date(filters.to + 'T23:59:59')) return false;
       if (filters.search) {
@@ -3448,10 +3612,10 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
   const exportExcel = () => {
     const bits = [];
     if (filters.status) bits.push(`Status: ${filters.status === 'done' ? 'Resolved / Closed' : (STATUS_CFG[filters.status]?.label || filters.status)}`);
-    if (filters.type) bits.push(`Category: ${filters.type}`);
-    if (filters.dept) bits.push(`Department: ${filters.dept}`);
-    if (filters.priority) bits.push(`Priority: ${(PRIORITY_CFG[filters.priority] || {}).label || filters.priority}`);
-    if (filters.assign) bits.push(`Technician: ${filters.assign === 'unassigned' ? 'Not assigned' : ((technicians.find(t => t.username === filters.assign) || {}).displayName || filters.assign)}`);
+    if (filters.type.length) bits.push(`Category: ${filters.type.join(', ')}`);
+    if (filters.dept.length) bits.push(`Department: ${filters.dept.join(', ')}`);
+    if (filters.priority.length) bits.push(`Priority: ${filters.priority.map(p => (PRIORITY_CFG[p] || {}).label || p).join(', ')}`);
+    if (filters.assign.length) bits.push(`Technician: ${filters.assign.map(a => (a === 'unassigned' ? 'Not assigned' : ((technicians.find(t => t.username === a) || {}).displayName || a))).join(', ')}`);
     if (filters.from) bits.push(`From: ${filters.from}`);
     if (filters.to) bits.push(`To: ${filters.to}`);
     if (filters.search) bits.push(`Search: ${filters.search}`);
@@ -3541,7 +3705,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: C.off }}>
+    <div style={{ minHeight: '100vh', background: 'transparent' }}>
       <style>{buildGS()}</style>
       <TopBar
         subtitle={perms.adminScope === 'assigned' ? 'Technician Portal — My Allocated Tickets' : 'Admin Portal — Complaint & Request Management System'}
@@ -3551,7 +3715,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
         tabs={TABS}
         activeTab={tab}
         onTabChange={setTab}
-        maxWidth={1400}
+        maxWidth={1680}
         extraActions={
           <>
             {notifSupported && notifPermission === 'default' && (
@@ -3579,7 +3743,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
               </button>
               {showNotif && (
                 <div className="slideDown" style={{
-                  position: 'absolute', top: 44, right: 0, width: 320, background: '#fff', borderRadius: 14,
+                  position: 'absolute', top: 44, right: 0, width: 320, background: C.glassPop, backdropFilter: 'blur(22px) saturate(170%)', WebkitBackdropFilter: 'blur(22px) saturate(170%)', borderRadius: 16,
                   boxShadow: '0 20px 50px #0b2a2240', border: `1px solid ${C.border}`, zIndex: 400, overflow: 'hidden'
                 }}>
                   <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -3628,7 +3792,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
         }
       />
 
-      <div className="page-main" style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 20px' }}>
+      <div className="page-main" style={{ maxWidth: 1680, margin: '0 auto', padding: '24px 20px' }}>
         {/* COMPLAINTS TAB */}
         {tab === 'complaints' && (
           <div className="fadeUp">
@@ -3640,17 +3804,17 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                 ['done', 'Resolved', stats.resolved, '#10b981'],
                 ['refused', 'Refused', stats.refused, '#ef4444'],
               ];
-              const activeFilters = ['type', 'dept', 'priority', 'assign', 'from', 'to'].filter(k => filters[k]).length;
+              const activeFilters = ['type', 'dept', 'priority', 'assign', 'from', 'to'].filter(k => (Array.isArray(filters[k]) ? filters[k].length > 0 : !!filters[k])).length;
               const seg = { display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 99, cursor: 'pointer', fontSize: 12.5, whiteSpace: 'nowrap' };
               const vbtn = (k, label) => (
                 <button key={k} onClick={() => setViewMode(k)}
                   style={{
                     padding: '6px 14px', fontSize: 12.5, cursor: 'pointer', border: 'none', fontWeight: 600,
-                    background: viewMode === k ? C.navy : '#fff', color: viewMode === k ? '#fff' : C.text2
+                    background: viewMode === k ? C.navy : C.glassHi, color: viewMode === k ? '#fff' : C.text2
                   }}>{label}</button>
               );
               return (
-                <Card style={{ padding: '12px 14px', marginBottom: 12 }}>
+                <Card style={{ padding: '12px 14px', marginBottom: 12, position: 'sticky', top: 'calc(var(--nav-h, 112px) + 8px)', zIndex: 30, background: C.glassHi }}>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                     <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 190 }}>
                       <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: C.muted, display: 'flex', pointerEvents: 'none' }}><SearchIcon /></span>
@@ -3663,7 +3827,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                         <button key={label} onClick={() => setF('status', k)}
                           style={{
                             ...seg, border: `1px solid ${filters.status === k ? C.navy : C.border2}`,
-                            background: filters.status === k ? C.goldL : '#fff',
+                            background: filters.status === k ? C.goldL : C.glassHi,
                             color: filters.status === k ? C.navy : C.text2, fontWeight: filters.status === k ? 700 : 500
                           }}>
                           <span style={{ width: 7, height: 7, borderRadius: '50%', background: col }} />
@@ -3684,28 +3848,16 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                   </div>
                   {showFilters && (
                     <div className="slideDown" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: 10, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
-                      <select value={filters.type} onChange={e => setF('type', e.target.value)} style={selectStyle}>
-                        <option value="">All Categories</option>
-                        {scopedTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                      </select>
-                      <select value={filters.dept} onChange={e => setF('dept', e.target.value)} style={selectStyle}>
-                        <option value="">All Departments / Locations</option>
-                        {deptOptionsInScope.map(d => <option key={d} value={d}>{d}</option>)}
-                      </select>
-                      <select value={filters.priority} onChange={e => setF('priority', e.target.value)} style={selectStyle}>
-                        <option value="">All Priorities</option>
-                        {Object.entries(PRIORITY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                      </select>
+                      <MultiSelect value={filters.type} onChange={v => setF('type', v)} placeholder="All Categories" style={selectStyle} options={scopedTypes} />
+                      <MultiSelect value={filters.dept} onChange={v => setF('dept', v)} placeholder="All Departments / Locations" style={selectStyle} options={deptOptionsInScope} />
+                      <MultiSelect value={filters.priority} onChange={v => setF('priority', v)} placeholder="All Priorities" style={selectStyle} options={Object.entries(PRIORITY_CFG).map(([k, v]) => ({ value: k, label: v.label }))} />
                       {perms.adminScope !== 'assigned' && (
-                        <select value={filters.assign} onChange={e => setF('assign', e.target.value)} style={selectStyle}>
-                          <option value="">All Allocations</option>
-                          <option value="unassigned">Not Assigned Yet</option>
-                          {filterTechnicians.map(t => <option key={t.username} value={t.username}>{t.displayName}</option>)}
-                        </select>
+                        <MultiSelect value={filters.assign} onChange={v => setF('assign', v)} placeholder="All Allocations" style={selectStyle}
+                          options={[{ value: 'unassigned', label: 'Not Assigned Yet' }, ...filterTechnicians.map(t => ({ value: t.username, label: t.displayName }))]} />
                       )}
                       <input type="date" value={filters.from} onChange={e => setF('from', e.target.value)} style={selectStyle} title="From date" />
                       <input type="date" value={filters.to} onChange={e => setF('to', e.target.value)} style={selectStyle} title="To date" />
-                      <Btn onClick={() => { setFilters({ dept: '', type: '', status: '', priority: '', assign: '', search: '', from: '', to: '' }); setVisibleCount(20); }}
+                      <Btn onClick={() => { setFilters({ dept: [], type: [], status: '', priority: [], assign: [], search: '', from: '', to: '' }); setVisibleCount(20); }}
                         variant="ghost" size="sm" style={{ height: 40 }}>Clear all</Btn>
                     </div>
                   )}
@@ -3727,8 +3879,8 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
               </div>
             ) : (
               <Card style={{ padding: 0, overflow: 'hidden' }}>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', minWidth: 980, borderCollapse: 'collapse' }}>
+                <div className="sticky-table" style={{ maxHeight: 'calc(100vh - var(--nav-h, 112px) - 190px)', minHeight: 320 }}>
+                  <table style={{ width: '100%', minWidth: 1020, borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: C.goldL, borderBottom: `1px solid ${C.border2}` }}>
                         {['Ticket', 'Priority', 'Employee', 'Category', 'Department / Location', 'Status', 'Technician', 'Raised', ''].map(h => (
@@ -3742,9 +3894,9 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                         const sla = slaState(c, Date.now());
                         return (
                           <tr key={c._docId || c.id} onClick={() => setDetailModal(c)}
-                            style={{ background: i % 2 === 0 ? '#fff' : C.off, borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}
-                            onMouseEnter={e => { e.currentTarget.style.background = C.goldL; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = i % 2 === 0 ? '#fff' : C.off; }}>
+                            style={{ background: i % 2 === 0 ? C.row1 : C.row2, borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}
+                            onMouseEnter={e => { e.currentTarget.style.background = `${C.gold}26`; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = i % 2 === 0 ? C.row1 : C.row2; }}>
                             <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
                               <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: C.navy, fontWeight: 700 }}>{c.id}</span>
                             </td>
@@ -3819,7 +3971,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                       <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
                       <XAxis dataKey="month" tick={{ fontSize: 11, fill: C.muted }} />
                       <YAxis tick={{ fontSize: 11, fill: C.muted }} />
-                      <Tooltip contentStyle={{ borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 12 }} />
+                      <Tooltip contentStyle={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(12px)', boxShadow: '0 10px 30px rgba(16,24,40,0.15)', borderRadius: 12, border: `1px solid ${C.border}`, fontSize: 12 }} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Area type="monotone" dataKey="total" stroke={C.navy} strokeWidth={2} fill="url(#totalGrad)" name="Total" />
                       <Area type="monotone" dataKey="resolved" stroke="#059669" strokeWidth={2} fill="url(#resolvedGrad)" name="Resolved" />
@@ -3839,7 +3991,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                         labelLine={false} fontSize={11}>
                         {typeData.map((_, i) => <Cell key={i} fill={chartColors()[i % chartColors().length]} />)}
                       </Pie>
-                      <Tooltip contentStyle={{ borderRadius: 10, fontSize: 12 }} />
+                      <Tooltip contentStyle={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(12px)', boxShadow: '0 10px 30px rgba(16,24,40,0.15)', borderRadius: 12, fontSize: 12 }} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                     </PieChart>
                   </ResponsiveContainer>
@@ -3856,7 +4008,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                     <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
                     <XAxis dataKey="month" tick={{ fontSize: 11, fill: C.muted }} />
                     <YAxis tick={{ fontSize: 11, fill: C.muted }} />
-                    <Tooltip contentStyle={{ borderRadius: 10, fontSize: 12 }} />
+                    <Tooltip contentStyle={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(12px)', boxShadow: '0 10px 30px rgba(16,24,40,0.15)', borderRadius: 12, fontSize: 12 }} />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
                     <Bar dataKey="resolved" fill="#059669" name="Resolved" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="hold" fill="#d97706" name="Processing" radius={[4, 4, 0, 0]} />
@@ -3871,7 +4023,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
         {/* USERS TAB — full admins only */}
         {tab === 'users' && perms.adminScope === 'all' && (
           <div className="fadeUp">
-            <Card style={{ padding: 22, marginBottom: 16 }}>
+            <Card style={{ padding: 22, marginBottom: 16, position: 'sticky', top: 'calc(var(--nav-h, 112px) + 8px)', zIndex: 30, background: C.glassHi }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
                 <div style={{ fontWeight: 700, fontSize: 17, color: C.text, fontFamily: "'Poppins',sans-serif" }}>User Management</div>
                 <div style={{ display: 'flex', gap: 10 }}>
@@ -3976,7 +4128,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
         title={assignModal && assignModal.assignedTo ? 'Reassign Ticket' : 'Assign to Technician'} width={480}>
         {assignModal && (
           <div>
-            <div style={{ background: C.off, borderRadius: 10, padding: '10px 14px', marginBottom: 16, border: `1px solid ${C.border}` }}>
+            <div style={{ background: C.inset, borderRadius: 10, padding: '10px 14px', marginBottom: 16, border: `1px solid ${C.border}` }}>
               <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: C.navy, fontWeight: 700 }}>{assignModal.id}</div>
               <div style={{ fontSize: 13, color: C.text2, marginTop: 4 }}>{assignModal.type} · {assignModal.dept}</div>
               {assignModal.assignedToName && (
@@ -4029,7 +4181,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
         width={480}>
         {actionModal && (
           <div>
-            <div style={{ background: C.off, borderRadius: 10, padding: '10px 14px', marginBottom: 18, border: `1px solid ${C.border}` }}>
+            <div style={{ background: C.inset, borderRadius: 10, padding: '10px 14px', marginBottom: 18, border: `1px solid ${C.border}` }}>
               <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>Ticket</div>
               <div style={{ fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: C.navy }}>{actionModal.id}</div>
               <div style={{ fontSize: 12, color: C.text2, marginTop: 2 }}>{actionModal.userName} · {actionModal.dept}</div>
@@ -4052,7 +4204,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {sug.map(txt => (
                           <button key={txt} onClick={() => af('solution', txt)} className="menu-item"
-                            style={{ padding: '5px 11px', borderRadius: 99, border: `1px solid ${C.border2}`, background: '#fff', color: C.text2, fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>{txt}</button>
+                            style={{ padding: '5px 11px', borderRadius: 99, border: `1px solid ${C.border2}`, background: C.glassHi, color: C.text2, fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>{txt}</button>
                         ))}
                       </div>
                     </div>
@@ -4158,7 +4310,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
       <Modal open={!!permModal} onClose={() => setPermModal(null)} title="Edit User" width={520}>
         {permModal && (
           <div>
-            <div style={{ background: C.off, borderRadius: 10, padding: '10px 14px', marginBottom: 16, border: `1px solid ${C.border}` }}>
+            <div style={{ background: C.inset, borderRadius: 10, padding: '10px 14px', marginBottom: 16, border: `1px solid ${C.border}` }}>
               <div style={{ fontSize: 12, color: C.muted }}>Username (login ID, cannot be changed):</div>
               <div style={{ fontWeight: 700, color: C.text, marginTop: 3, fontFamily: "'JetBrains Mono',monospace" }}>{permModal.username}</div>
             </div>
@@ -4201,7 +4353,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
       <Modal open={!!resetPwModal} onClose={() => setResetPwModal(null)} title="Reset User Password" width={400}>
         {resetPwModal && (
           <div>
-            <div style={{ background: C.off, borderRadius: 10, padding: '10px 14px', marginBottom: 16, border: `1px solid ${C.border}` }}>
+            <div style={{ background: C.inset, borderRadius: 10, padding: '10px 14px', marginBottom: 16, border: `1px solid ${C.border}` }}>
               <div style={{ fontSize: 12, color: C.muted }}>Resetting password for:</div>
               <div style={{ fontWeight: 700, color: C.text, marginTop: 3 }}>{resetPwModal.displayName}</div>
               <div style={{ fontSize: 11, color: C.muted, fontFamily: "'JetBrains Mono',monospace" }}>{resetPwModal.username}</div>
@@ -4268,7 +4420,8 @@ function LogsPanel() {
 
   return (
     <div className="fadeUp">
-      <Card style={{ padding: '16px 20px', marginBottom: 18 }}>
+      <div style={{ position: 'sticky', top: 'calc(var(--nav-h, 112px) + 8px)', zIndex: 30 }}>
+      <Card style={{ padding: '14px 20px', marginBottom: 10, background: C.glassHi }}>
         <div style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase', marginBottom: 10 }}>
           Log Type
         </div>
@@ -4277,21 +4430,21 @@ function LogsPanel() {
             style={{
               padding: '6px 14px', borderRadius: 99, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
               border: `1.5px solid ${lf.type === '' ? C.navy : C.border2}`,
-              background: lf.type === '' ? C.navy : '#fff', color: lf.type === '' ? '#fff' : C.text2
+              background: lf.type === '' ? C.navy : C.glassHi, color: lf.type === '' ? '#fff' : C.text2
             }}>All Logs ({logs.length})</button>
           {Object.entries(LOG_TYPES).filter(([k]) => k !== 'chat' || (counts.chat || 0) > 0).map(([k, v]) => (
             <button key={k} onClick={() => setF2('type', k)}
               style={{
                 padding: '6px 14px', borderRadius: 99, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
                 border: `1.5px solid ${lf.type === k ? C.navy : C.border2}`,
-                background: lf.type === k ? C.navy : '#fff', color: lf.type === k ? '#fff' : C.text2
+                background: lf.type === k ? C.navy : C.glassHi, color: lf.type === k ? '#fff' : C.text2
               }}>{v.label} ({counts[k] || 0})</button>
           ))}
         </div>
       </Card>
 
-      <Card style={{ padding: 22, marginBottom: 18 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+      <Card style={{ padding: '16px 20px', marginBottom: 12, background: C.glassHi }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
           <div style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase' }}>
             Activity Logs — latest 1000 entries, read-only
           </div>
@@ -4308,6 +4461,7 @@ function LogsPanel() {
           <Btn onClick={() => { setLf({ type: '', search: '', from: '', to: '' }); setVisible(50); }} variant="ghost" size="sm" style={{ height: 40 }}>Clear</Btn>
         </div>
       </Card>
+      </div>
 
       {!loaded ? (
         <Card style={{ textAlign: 'center', padding: 48 }}><div style={{ color: C.muted }}>Loading logs...</div></Card>
@@ -4315,10 +4469,10 @@ function LogsPanel() {
         <Card style={{ textAlign: 'center', padding: 48 }}><div style={{ fontWeight: 600, color: C.muted }}>No log entries match your filters</div></Card>
       ) : (
         <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
+          <div className="sticky-table" style={{ maxHeight: 'calc(100vh - var(--nav-h, 112px) - 330px)', minHeight: 300 }}>
             <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{ background: C.off, borderBottom: `2px solid ${C.border}` }}>
+                <tr style={{ background: C.inset, borderBottom: `2px solid ${C.border}` }}>
                   {['Time', 'Type', 'Action', 'By', 'Ticket', 'Target', 'Details'].map(h => (
                     <th key={h} style={{
                       textAlign: 'left', padding: '12px 16px', fontSize: 11, fontWeight: 700, color: C.muted,
@@ -4331,7 +4485,7 @@ function LogsPanel() {
                 {filtered.slice(0, visible).map((l, i) => {
                   const t = LOG_TYPES[l.type] || { label: l.type, color: C.muted, bg: C.off };
                   return (
-                    <tr key={l._id} style={{ background: i % 2 === 0 ? '#fff' : C.off, borderBottom: `1px solid ${C.border}` }}>
+                    <tr key={l._id} style={{ background: i % 2 === 0 ? C.row1 : C.row2, borderBottom: `1px solid ${C.border}` }}>
                       <td style={{ padding: '10px 16px', fontSize: 12, color: C.muted, whiteSpace: 'nowrap' }}>{fmtDT(l.at)}</td>
                       <td style={{ padding: '10px 16px' }}>
                         <span style={{ fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 99, background: t.bg, color: t.color, whiteSpace: 'nowrap' }}>{t.label}</span>
