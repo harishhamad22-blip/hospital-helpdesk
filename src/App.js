@@ -496,6 +496,7 @@ if (typeof window !== 'undefined' && !window.__glassSpot) {
       const el = e.target && e.target.closest ? e.target.closest('.glass-card') : null;
       if (!el) return;
       const r = el.getBoundingClientRect();
+      if (r.width > 640) return;
       el.style.setProperty('--mx', (e.clientX - r.left) + 'px');
       el.style.setProperty('--my', (e.clientY - r.top) + 'px');
     });
@@ -624,7 +625,12 @@ button:focus-visible{outline:2px solid ${C.gold};outline-offset:2px;}
 @media(min-width:1500px){body.assistant-docked .page-main{margin-right:344px!important;}body.assistant-docked .modal-overlay{right:344px!important;}}
 .assistant-panel{top:auto!important;height:min(500px,calc(100vh - var(--nav-h,112px) - 28px))!important;}
 .modal-overlay{overscroll-behavior:contain;}
+.login-left,.login-right{position:relative;z-index:1;}
 .sticky-table{overflow:auto;}
+.app-shell{display:flex;flex-direction:column;height:calc(100vh - var(--nav-h,112px) - 40px);min-height:420px;margin-bottom:-84px;}
+.app-scroll{flex:1;min-height:0;overflow-y:auto;padding:2px 6px 8px 2px;align-content:start;}
+.app-fill{flex:1;min-height:0;display:flex;flex-direction:column;}
+@media(max-width:760px){.app-shell{height:auto;min-height:0;margin-bottom:0;}.app-scroll,.app-fill{flex:none;overflow:visible;}.app-fill .sticky-table{flex:none!important;max-height:70vh;}}
 .sticky-table thead th{position:sticky;top:0;z-index:5;background:${C.goldL};box-shadow:0 1px 0 ${C.border2};}
 .fadeIn{animation:fadeIn .3s ease both;}
 .slideDown{animation:slideDown .18s ease both;}
@@ -845,6 +851,182 @@ const LOGIN_SLIDES = [
     desc: 'Connect departments, streamline service requests, and improve support operations across the hospital.'
   }
 ];
+
+// Full-page water background for the login screen. The page background (soft aurora colours + dot grid) is
+// painted into a canvas, then a real height-field wave simulation refracts it: mouse / touch / click and random
+// raindrops send ripples across the WHOLE page behind the cards. Colours stay the same as the normal theme.
+function WaterBackground() {
+  const canvasRef = useRef(null);
+  const sig = `${C.gold}${C.navy3}${C.navy}${C.off}${C.border2}`;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return undefined;
+
+    const DAMP = 0.99, REFR = 0.05, SHADE = 0.11, MAXD = 12;
+    let W = 0, H = 0, scale = 1, cw = 0, ch = 0;
+    let srcData = null, srcU32 = null, outImg = null, outU32 = null;
+    let hA = null, hB = null;
+    let raf = 0, running = false, quiet = 0, ready = false, dead = false, rainTimer = 0, resizeTimer = 0;
+    let lastX = -999, lastY = -999;
+
+    const paint = (g) => {
+      g.fillStyle = C.off; g.fillRect(0, 0, W, H);
+      const blob = (fx, fy, fr, col, a) => {
+        const x = fx * W, y = fy * H, r = fr * W;
+        const gr = g.createRadialGradient(x, y, 0, x, y, r);
+        gr.addColorStop(0, col + a); gr.addColorStop(1, col + '00');
+        g.fillStyle = gr; g.fillRect(0, 0, W, H);
+      };
+      blob(0.18, 0.22, 0.34, C.gold, '3d');
+      blob(0.82, 0.14, 0.36, C.navy3, '33');
+      blob(0.74, 0.86, 0.34, '#a78bfa', '33');
+      blob(0.12, 0.88, 0.30, '#fbbf24', '33');
+      blob(0.50, 0.50, 0.50, '#ffffff', '99');
+      // dot grid (gives the water something to bend)
+      const gap = Math.max(10, 22 * scale), rad = Math.max(0.8, 1.1 * scale);
+      g.fillStyle = C.border2;
+      for (let y = gap / 2; y < H; y += gap) {
+        for (let x = gap / 2; x < W; x += gap) {
+          g.globalAlpha = x < W * 0.58 ? 0.6 : 0.26;
+          g.beginPath(); g.arc(x, y, rad, 0, 6.2832); g.fill();
+        }
+      }
+      g.globalAlpha = 1;
+    };
+
+    const build = () => {
+      cw = window.innerWidth; ch = window.innerHeight;
+      if (!cw || !ch) return;
+      scale = Math.min(1, 1100 / cw);
+      W = Math.round(cw * scale); H = Math.round(ch * scale);
+      canvas.width = W; canvas.height = H;
+      const tmp = document.createElement('canvas');
+      tmp.width = W; tmp.height = H;
+      const tctx = tmp.getContext('2d');
+      paint(tctx);
+      try { srcData = tctx.getImageData(0, 0, W, H); } catch (e) { ready = false; return; }
+      srcU32 = new Uint32Array(srcData.data.buffer);
+      outImg = ctx.createImageData(W, H);
+      outU32 = new Uint32Array(outImg.data.buffer);
+      hA = new Float32Array(W * H);
+      hB = new Float32Array(W * H);
+      ctx.putImageData(srcData, 0, 0);
+      canvas.style.opacity = '1';
+      ready = true;
+    };
+
+    const frame = () => {
+      raf = 0;
+      if (!ready || dead) { running = false; return; }
+      for (let k = 0; k < 2; k++) {
+        for (let y = 1; y < H - 1; y++) {
+          let i = y * W + 1;
+          for (let x = 1; x < W - 1; x++, i++) {
+            hB[i] = ((hA[i - 1] + hA[i + 1] + hA[i - W] + hA[i + W]) * 0.5 - hB[i]) * DAMP;
+          }
+        }
+        const t = hA; hA = hB; hB = t;
+      }
+      const sd = srcData.data, od = outImg.data;
+      let maxH = 0;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const i = y * W + x;
+          if (x === 0 || y === 0 || x === W - 1 || y === H - 1) { outU32[i] = srcU32[i]; continue; }
+          const v = hA[i];
+          const av = v < 0 ? -v : v;
+          if (av > maxH) maxH = av;
+          const gx = hA[i - 1] - hA[i + 1];
+          const gy = hA[i - W] - hA[i + W];
+          if (gx * gx + gy * gy < 4) { outU32[i] = srcU32[i]; continue; }
+          let dx = Math.round(gx * REFR), dy = Math.round(gy * REFR);
+          if (dx > MAXD) dx = MAXD; else if (dx < -MAXD) dx = -MAXD;
+          if (dy > MAXD) dy = MAXD; else if (dy < -MAXD) dy = -MAXD;
+          let sx = x + dx, sy = y + dy;
+          if (sx < 0) sx = 0; else if (sx > W - 1) sx = W - 1;
+          if (sy < 0) sy = 0; else if (sy > H - 1) sy = H - 1;
+          const si = (sy * W + sx) * 4, o = i * 4;
+          const shade = (gx - gy) * SHADE;
+          od[o] = sd[si] + shade; od[o + 1] = sd[si + 1] + shade; od[o + 2] = sd[si + 2] + shade; od[o + 3] = 255;
+        }
+      }
+      ctx.putImageData(outImg, 0, 0);
+      quiet = maxH < 0.4 ? quiet + 1 : 0;
+      if (quiet > 12) {
+        ctx.putImageData(srcData, 0, 0);
+        hA.fill(0); hB.fill(0);
+        running = false;
+        return;
+      }
+      raf = requestAnimationFrame(frame);
+    };
+
+    const start = () => {
+      if (running || !ready || dead) return;
+      running = true; quiet = 0;
+      raf = requestAnimationFrame(frame);
+    };
+
+    const drop = (px, py, strength, radius) => {
+      if (!ready) return;
+      const r = Math.max(3, Math.round(radius * scale));
+      const cx = Math.round(px), cy = Math.round(py);
+      for (let y = -r; y <= r; y++) {
+        const yy = cy + y;
+        if (yy < 1 || yy >= H - 1) continue;
+        for (let x = -r; x <= r; x++) {
+          const xx = cx + x;
+          if (xx < 1 || xx >= W - 1) continue;
+          const d = Math.sqrt(x * x + y * y);
+          if (d > r) continue;
+          hA[yy * W + xx] += strength * 0.5 * (1 + Math.cos(Math.PI * d / r));
+        }
+      }
+      start();
+    };
+
+    const onMove = (e) => {
+      if (!ready) return;
+      const x = e.clientX * (W / cw), y = e.clientY * (H / ch);
+      const dist = Math.hypot(x - lastX, y - lastY);
+      if (dist < 8) return;
+      lastX = x; lastY = y;
+      drop(x, y, 170 + Math.min(dist, 60) * 3, 12);
+    };
+    const onDown = (e) => { if (ready) drop(e.clientX * (W / cw), e.clientY * (H / ch), 520, 22); };
+    const onResize = () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(build, 180); };
+
+    const rain = () => {
+      if (dead) return;
+      if (ready && !document.hidden) drop(Math.random() * W, Math.random() * H, 240 + Math.random() * 200, 10 + Math.random() * 10);
+      rainTimer = setTimeout(rain, 1600 + Math.random() * 2400);
+    };
+
+    build();
+    if (ready) { drop(W * 0.3, H * 0.5, 380, 20); rainTimer = setTimeout(rain, 2200); }
+
+    window.addEventListener('pointermove', onMove, { passive: true });
+    window.addEventListener('pointerdown', onDown, { passive: true });
+    window.addEventListener('resize', onResize);
+    return () => {
+      dead = true;
+      if (raf) cancelAnimationFrame(raf);
+      clearTimeout(rainTimer); clearTimeout(resizeTimer);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [sig]);
+
+  return (
+    <canvas ref={canvasRef} aria-hidden="true"
+      style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', zIndex: 0, pointerEvents: 'none', opacity: 0, transition: 'opacity .5s ease' }} />
+  );
+}
 
 // Auto-rotating slider with a soft glass panel + mirror-style reflection under the artwork
 function LoginSlider() {
@@ -2627,6 +2809,7 @@ function LoginPage({ onLogin }) {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', background: 'transparent', position: 'relative' }}>
       <style>{buildGS()}</style>
+      <WaterBackground />
       <div style={{ position: 'absolute', top: 16, right: 18, zIndex: 20 }}><ThemeMenu light /></div>
 
       {/* ── LEFT — brand / slider panel ── */}
@@ -2634,11 +2817,6 @@ function LoginPage({ onLogin }) {
         flex: '1 1 58%', position: 'relative', overflow: 'hidden',
         display: 'flex', flexDirection: 'column', padding: '30px 44px'
       }}>
-        <div style={{
-          position: 'absolute', inset: 0, opacity: .5, pointerEvents: 'none',
-          backgroundImage: `radial-gradient(${C.border2} 1px, transparent 1px)`,
-          backgroundSize: '22px 22px'
-        }} />
         <div style={{
           position: 'absolute', top: -120, right: -120, width: 340, height: 340, borderRadius: '50%',
           background: `radial-gradient(circle,${C.goldL},transparent 70%)`, pointerEvents: 'none'
@@ -3795,7 +3973,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
       <div className="page-main" style={{ maxWidth: 1680, margin: '0 auto', padding: '24px 20px' }}>
         {/* COMPLAINTS TAB */}
         {tab === 'complaints' && (
-          <div className="fadeUp">
+          <div className="fadeUp app-shell">
             {(() => {
               const segs = [
                 ['', 'All', stats.total, C.navy],
@@ -3814,7 +3992,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                   }}>{label}</button>
               );
               return (
-                <Card style={{ padding: '12px 14px', marginBottom: 12, position: 'sticky', top: 'calc(var(--nav-h, 112px) + 8px)', zIndex: 30, background: C.glassHi }}>
+                <Card style={{ padding: '12px 14px', marginBottom: 12, flexShrink: 0, maxHeight: '55%', overflowY: 'auto', background: C.glassHi }}>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                     <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 190 }}>
                       <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: C.muted, display: 'flex', pointerEvents: 'none' }}><SearchIcon /></span>
@@ -3865,10 +4043,11 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
               );
             })()}
 
-            <div style={{ fontSize: 12, color: C.muted, margin: '0 2px 10px' }}>
+            <div style={{ fontSize: 12, color: C.muted, margin: '0 2px 10px', flexShrink: 0 }}>
               Showing {Math.min(filtered.length, visibleCount)} of {filtered.length} tickets{filtered.length !== scopedComplaints.length ? ` (total ${scopedComplaints.length})` : ''}
             </div>
 
+            <div className={viewMode === 'grid' ? 'app-scroll' : 'app-fill'}>
             {filtered.length === 0 ? (
               <Card style={{ textAlign: 'center', padding: 48 }}>
                 <div style={{ fontWeight: 600, color: C.muted }}>No tickets match the current view</div>
@@ -3878,8 +4057,8 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                 {filtered.slice(0, visibleCount).map(c => <TicketGridCard key={c._docId || c.id} c={c} onOpen={setDetailModal} />)}
               </div>
             ) : (
-              <Card style={{ padding: 0, overflow: 'hidden' }}>
-                <div className="sticky-table" style={{ maxHeight: 'calc(100vh - var(--nav-h, 112px) - 190px)', minHeight: 320 }}>
+              <Card style={{ padding: 0, overflow: 'hidden', flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.9)', backdropFilter: 'none', WebkitBackdropFilter: 'none' }}>
+                <div className="sticky-table" style={{ flex: 1, minHeight: 0 }}>
                   <table style={{ width: '100%', minWidth: 1020, borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: C.goldL, borderBottom: `1px solid ${C.border2}` }}>
@@ -3927,12 +4106,13 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
               </Card>
             )}
             {filtered.length > visibleCount && (
-              <div style={{ textAlign: 'center', marginTop: 18 }}>
+              <div style={{ textAlign: 'center', marginTop: 18, flexShrink: 0 }}>
                 <Btn onClick={() => setVisibleCount(v => v + 20)} variant="outline" size="md">
                   Load more ({filtered.length - visibleCount} remaining)
                 </Btn>
               </div>
             )}
+            </div>
           </div>
         )}
 
@@ -4022,8 +4202,8 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
 
         {/* USERS TAB — full admins only */}
         {tab === 'users' && perms.adminScope === 'all' && (
-          <div className="fadeUp">
-            <Card style={{ padding: 22, marginBottom: 16, position: 'sticky', top: 'calc(var(--nav-h, 112px) + 8px)', zIndex: 30, background: C.glassHi }}>
+          <div className="fadeUp app-shell">
+            <Card style={{ padding: 22, marginBottom: 16, flexShrink: 0, background: C.glassHi }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
                 <div style={{ fontWeight: 700, fontSize: 17, color: C.text, fontFamily: "'Poppins',sans-serif" }}>User Management</div>
                 <div style={{ display: 'flex', gap: 10 }}>
@@ -4036,7 +4216,7 @@ function AdminPortal({ user, onLogout, canSwitch = false, onSwitchView, onUserUp
                 placeholder="Search by username or name..."
                 style={{ ...inputStyle, marginBottom: 0 }} />
             </Card>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 12 }}>
+            <div className="app-scroll" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 12, alignContent: 'start' }}>
               {filteredUsers.slice(0, 100).map(u => {
                 const up = deriveUserPerms(u);
                 return (
@@ -4419,8 +4599,8 @@ function LogsPanel() {
   const sel = { ...inputStyle, fontSize: 12, padding: '9px 12px', height: 40 };
 
   return (
-    <div className="fadeUp">
-      <div style={{ position: 'sticky', top: 'calc(var(--nav-h, 112px) + 8px)', zIndex: 30 }}>
+    <div className="fadeUp app-shell">
+      <div style={{ flexShrink: 0 }}>
       <Card style={{ padding: '14px 20px', marginBottom: 10, background: C.glassHi }}>
         <div style={{ fontSize: 12, color: C.muted, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase', marginBottom: 10 }}>
           Log Type
@@ -4463,13 +4643,14 @@ function LogsPanel() {
       </Card>
       </div>
 
+      <div className="app-fill">
       {!loaded ? (
         <Card style={{ textAlign: 'center', padding: 48 }}><div style={{ color: C.muted }}>Loading logs...</div></Card>
       ) : filtered.length === 0 ? (
         <Card style={{ textAlign: 'center', padding: 48 }}><div style={{ fontWeight: 600, color: C.muted }}>No log entries match your filters</div></Card>
       ) : (
-        <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <div className="sticky-table" style={{ maxHeight: 'calc(100vh - var(--nav-h, 112px) - 330px)', minHeight: 300 }}>
+        <Card style={{ padding: 0, overflow: 'hidden', flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.9)', backdropFilter: 'none', WebkitBackdropFilter: 'none' }}>
+          <div className="sticky-table" style={{ flex: 1, minHeight: 0 }}>
             <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: C.inset, borderBottom: `2px solid ${C.border}` }}>
@@ -4507,10 +4688,11 @@ function LogsPanel() {
         </Card>
       )}
       {filtered.length > visible && (
-        <div style={{ textAlign: 'center', marginTop: 18 }}>
+        <div style={{ textAlign: 'center', marginTop: 18, flexShrink: 0 }}>
           <Btn onClick={() => setVisible(v => v + 50)} variant="outline" size="md">Load More ({filtered.length - visible} remaining)</Btn>
         </div>
       )}
+      </div>
     </div>
   );
 }
